@@ -5,6 +5,7 @@ A serverless FastAPI backend for managing Zapier webhook triggers, built with AW
 ## Architecture
 
 - **Backend**: FastAPI running on AWS Lambda with Lambda Web Adapter
+- **Frontend**: React + TypeScript web app for event submission (Sender UI)
 - **Database**: DynamoDB for event storage with GSI for status queries
 - **Secrets**: AWS Secrets Manager for secure credential storage
 - **Infrastructure**: AWS Amplify Gen 2 with CDK for IaC
@@ -122,6 +123,13 @@ apier/
 │   │       ├── main.py       # FastAPI app
 │   │       └── requirements.txt
 │   └── storage/              # Storage resources
+├── frontend/                  # React web app (Sender UI)
+│   ├── src/
+│   │   ├── components/       # React components
+│   │   ├── App.tsx          # Main app component
+│   │   └── main.tsx         # Entry point
+│   ├── .env.example         # Environment template
+│   └── README.md            # Frontend documentation
 ├── amplify.yml               # Amplify build configuration
 ├── docs/                     # Documentation
 │   ├── QUICKSTART.md        # 5-minute getting started guide

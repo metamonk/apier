@@ -45,3 +45,7 @@ amplifyconfiguration*
 results/*.json
 results/*.html
 results/load-test-report.md
+
+# Frontend build output
+frontend/dist/
+frontend/.env
