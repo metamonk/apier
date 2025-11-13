@@ -5,7 +5,13 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as cdk from 'aws-cdk-lib';
 import { RemovalPolicy } from 'aws-cdk-lib';
-import path from 'path';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Zapier Triggers API Backend
@@ -52,13 +58,16 @@ eventsTable.addGlobalSecondaryIndex({
 
 // Create Lambda function with Docker (FastAPI + Lambda Web Adapter)
 const triggersApiFunction = new lambda.DockerImageFunction(stack, 'TriggersApiFunction', {
-  functionName: `triggers-api-${stack.stackName}`,
-  code: lambda.DockerImageCode.fromImageAsset(path.join(__dirname, 'functions/api')),
+  // Don't specify functionName - let CDK auto-generate a short one
+  code: lambda.DockerImageCode.fromImageAsset(join(__dirname, 'functions/api'), {
+    platform: Platform.LINUX_AMD64, // Explicitly set x86_64 architecture
+  }),
+  architecture: lambda.Architecture.X86_64, // Match Lambda architecture
   memorySize: 512,
   timeout: cdk.Duration.seconds(30),
   environment: {
     DYNAMODB_TABLE_NAME: eventsTable.tableName,
-    AWS_REGION: stack.region,
+    // AWS_REGION is automatically provided by Lambda runtime
   },
 });
 

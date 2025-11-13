@@ -1,7 +1,7 @@
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
-# Copy Lambda Web Adapter
-COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
+# Copy Lambda Web Adapter (use specific platform)
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1-x86_64 /lambda-adapter /opt/extensions/lambda-adapter
 
 # Set working directory
 WORKDIR /var/task
