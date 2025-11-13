@@ -130,19 +130,47 @@ apier/
 
 Base URL: `{FunctionURL}` (provided after deployment)
 
+### Interactive API Documentation
+
+The API provides comprehensive interactive documentation via Swagger UI:
+
+- **Swagger UI**: [`https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/docs`](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/docs)
+- **OpenAPI JSON**: [`https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/openapi.json`](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/openapi.json)
+- **ReDoc**: [`https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/redoc`](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/redoc)
+
+The documentation includes:
+- Detailed endpoint descriptions with examples
+- Request/response schemas with sample data
+- Authentication requirements and flow
+- "Try it out" functionality to test endpoints directly
+- Organized by tags: Authentication, Events, Inbox, Health, Configuration
+
 ### Endpoints
 
-- `GET /` - Health check
-- `GET /docs` - Interactive API documentation (Swagger UI)
-- `POST /events` - Create event
-- `GET /events` - List events (with pagination)
-- `GET /events/{id}` - Get specific event
-- `PUT /events/{id}` - Update event
-- `DELETE /events/{id}` - Delete event
+#### Authentication
+- `POST /token` - Obtain JWT access token for API authentication
+
+#### Health & Status
+- `GET /` - Root endpoint with API information
+- `GET /health` - Health check endpoint
+- `GET /config` - Configuration status (non-sensitive values)
+
+#### Events
+- `POST /events` - Create and ingest new event (requires JWT auth)
+
+#### Inbox (Zapier Polling)
+- `GET /inbox` - Retrieve pending events (requires JWT auth)
+- `POST /inbox/{event_id}/ack` - Acknowledge event delivery (requires JWT auth)
 
 ### Authentication
 
-Currently uses API key authentication stored in AWS Secrets Manager.
+The API uses JWT Bearer token authentication:
+
+1. **Obtain Token**: POST to `/token` with credentials (username: "api", password: API key from Secrets Manager)
+2. **Use Token**: Include in Authorization header: `Authorization: Bearer {token}`
+3. **Token Validity**: 24 hours
+
+See the [Swagger UI documentation](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/docs) for interactive examples.
 
 ## Testing
 
