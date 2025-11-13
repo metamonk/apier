@@ -280,6 +280,9 @@ async def create_event(
     event_id = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat() + "Z"
 
+    # Calculate TTL for GDPR/CCPA compliance (90 days from now)
+    ttl_timestamp = int((datetime.utcnow() + timedelta(days=90)).timestamp())
+
     # Store event in DynamoDB
     event_data = {
         "id": event_id,
@@ -288,7 +291,8 @@ async def create_event(
         "payload": event.payload,
         "status": "pending",
         "created_at": timestamp,
-        "updated_at": timestamp
+        "updated_at": timestamp,
+        "ttl": ttl_timestamp  # GDPR/CCPA: Auto-delete after 90 days
     }
 
     try:

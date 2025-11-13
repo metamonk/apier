@@ -243,6 +243,20 @@ curl -X POST "https://YOUR_FUNCTION_URL/events" \
 
 **See [SECURITY.md](./SECURITY.md) for comprehensive security documentation.**
 
+## GDPR & CCPA Compliance
+
+The API implements data retention policies for regulatory compliance:
+
+- ✅ **Automatic Data Deletion**: Events auto-deleted after 90 days via DynamoDB TTL
+- ✅ **Encryption**: Data encrypted in transit (TLS) and at rest (DynamoDB)
+- ✅ **Access Control**: JWT authentication prevents unauthorized access
+- ✅ **Audit Logging**: CloudWatch logs all API activity
+- ✅ **Compliance Documentation**: Detailed policies and procedures
+
+**Data Retention**: All events are automatically deleted 90 days after creation using DynamoDB Time-To-Live (TTL).
+
+**See [COMPLIANCE.md](./COMPLIANCE.md) for comprehensive compliance documentation.**
+
 ## Troubleshooting
 
 ### Build Failures

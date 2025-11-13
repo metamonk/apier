@@ -36,6 +36,8 @@ const eventsTable = new dynamodb.Table(stack, 'EventsTable', {
   billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
   removalPolicy: RemovalPolicy.RETAIN,
   pointInTimeRecovery: true,
+  // GDPR/CCPA Compliance: Automatic data deletion after 90 days
+  timeToLiveAttribute: 'ttl',
 });
 
 // Add GSI for status queries
