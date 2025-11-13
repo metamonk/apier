@@ -293,6 +293,7 @@ Comprehensive guides are available in the `docs/` directory:
 - **[SECURITY.md](./docs/SECURITY.md)** - Authentication, authorization, and security best practices
 - **[SECRETS.md](./docs/SECRETS.md)** - AWS Secrets Manager configuration and rotation
 - **[MONITORING.md](./docs/MONITORING.md)** - CloudWatch logs, metrics, and alerting
+- **[SNS_ALERTS.md](./docs/SNS_ALERTS.md)** - SNS alert configuration and testing guide
 - **[TESTING.md](./docs/TESTING.md)** - Test suite, coverage, and testing procedures
 - **[COMPLIANCE.md](./docs/COMPLIANCE.md)** - GDPR/CCPA compliance and data retention
 

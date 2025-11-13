@@ -210,6 +210,8 @@ aws cloudwatch put-dashboard \
 
 ## CloudWatch Alarms and SNS Notifications
 
+> **📘 For detailed SNS alert configuration, testing, and troubleshooting, see [SNS_ALERTS.md](./SNS_ALERTS.md)**
+
 ### Automated Alarms
 
 The following CloudWatch alarms are automatically configured:

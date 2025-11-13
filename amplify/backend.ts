@@ -129,11 +129,9 @@ const alertsTopic = new sns.Topic(stack, 'AlertsTopic', {
   displayName: 'Zapier Triggers API Alerts',
 });
 
-// Add email subscription (NOTE: Replace with actual email after deployment)
-// You can also add subscriptions via AWS Console or CLI
-alertsTopic.addSubscription(
-  new subscriptions.EmailSubscription('REPLACE_WITH_YOUR_EMAIL@example.com')
-);
+// Email subscriptions should be added after deployment via AWS Console or CLI
+// This avoids hardcoding emails in infrastructure code and handles confirmation flow properly
+// See docs/SNS_ALERTS.md for subscription instructions
 
 // Output SNS topic ARN
 new cdk.CfnOutput(stack, 'AlertsTopicArn', {
