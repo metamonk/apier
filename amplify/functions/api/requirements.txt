@@ -6,3 +6,4 @@ mangum==0.17.0
 python-jose[cryptography]==3.3.0
 pwdlib[argon2]==0.2.1
 python-multipart==0.0.20
+aws-xray-sdk==2.14.0

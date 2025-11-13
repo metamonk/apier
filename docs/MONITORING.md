@@ -4,11 +4,350 @@ This document covers monitoring, logging, and alerting for the Zapier Triggers A
 
 ## Overview
 
-The API uses **AWS CloudWatch** for:
-- Log aggregation and analysis
-- Performance metrics
-- Error tracking
-- Custom alarms
+The API uses comprehensive AWS monitoring services:
+
+- **AWS CloudWatch**: Log aggregation, performance metrics, and custom dashboards
+- **AWS X-Ray**: Distributed tracing for request analysis and debugging
+- **Amazon SNS**: Real-time alerting and incident notifications
+- **CloudWatch Alarms**: Automated threshold monitoring with SNS integration
+
+### Key Monitoring Features
+
+- Real-time performance dashboards with Lambda and DynamoDB metrics
+- Distributed tracing with X-Ray for debugging and latency analysis
+- Automated alerting for errors, performance degradation, and throttling
+- Email notifications via SNS for critical incidents
+- Custom metrics for API-specific monitoring
+
+## AWS X-Ray Distributed Tracing
+
+### Overview
+
+AWS X-Ray provides end-to-end tracing of requests through your Lambda function, automatically tracking:
+- Lambda invocation details
+- AWS SDK calls (DynamoDB, Secrets Manager)
+- HTTP requests and responses
+- Service latency and errors
+
+### Accessing X-Ray Traces
+
+#### Via AWS Console
+
+1. Go to **X-Ray** → **Traces**
+2. Filter by time range and response codes
+3. Click on individual traces to see detailed service map
+4. View subsegments for each AWS service call
+
+#### Via AWS CLI
+
+```bash
+# Get recent traces
+aws xray get-trace-summaries \
+  --start-time $(date -u -d '1 hour ago' +%s) \
+  --end-time $(date -u +%s) \
+  --region us-east-2
+
+# Get specific trace details
+aws xray batch-get-traces \
+  --trace-ids {trace-id} \
+  --region us-east-2
+```
+
+### X-Ray Service Map
+
+The service map visualizes your application architecture:
+
+1. **Lambda Function**: Your FastAPI application
+2. **DynamoDB**: Event storage operations
+3. **Secrets Manager**: Credential retrieval
+4. **AWS SDK**: All boto3 calls are automatically traced
+
+**View Service Map:**
+- X-Ray Console → Service map
+- Shows latency, error rates, and traffic flow
+- Identify performance bottlenecks
+
+### Instrumentation
+
+The Lambda function is instrumented with X-Ray SDK:
+
+```python
+# Already configured in main.py
+from aws_xray_sdk.core import xray_recorder, patch_all
+
+# Automatically instruments boto3 and other AWS SDK calls
+patch_all()
+```
+
+**What gets traced:**
+- All DynamoDB queries (Query, PutItem, UpdateItem)
+- Secrets Manager GetSecretValue calls
+- FastAPI endpoint execution
+- Cold start vs warm start performance
+
+### Analyzing Traces
+
+#### Identify Slow Requests
+
+```bash
+# Find traces with duration > 1 second
+aws xray get-trace-summaries \
+  --start-time $(date -u -d '1 hour ago' +%s) \
+  --end-time $(date -u +%s) \
+  --filter-expression 'duration > 1' \
+  --region us-east-2
+```
+
+#### Find Error Traces
+
+```bash
+# Get traces with errors
+aws xray get-trace-summaries \
+  --start-time $(date -u -d '1 hour ago' +%s) \
+  --end-time $(date -u +%s) \
+  --filter-expression 'error = true OR fault = true' \
+  --region us-east-2
+```
+
+#### Analyze Cold Starts
+
+```bash
+# Filter for initialization subsegments
+# Look for traces with "Initialization" in segments
+# Cold starts typically show >1s duration for first invocation
+```
+
+### Custom Annotations (Optional)
+
+Add custom annotations for more detailed tracing:
+
+```python
+from aws_xray_sdk.core import xray_recorder
+
+@app.post("/events")
+async def create_event(event: Event):
+    # Add custom annotation
+    xray_recorder.put_annotation('event_type', event.type)
+    xray_recorder.put_annotation('event_source', event.source)
+
+    # Add metadata
+    xray_recorder.put_metadata('event_payload_size', len(str(event.payload)))
+
+    # Your existing code...
+```
+
+## CloudWatch Dashboards
+
+### Automated Dashboard
+
+A comprehensive CloudWatch dashboard is automatically created during deployment:
+
+**Dashboard Name**: `ZapierTriggersAPI-{stack-name}`
+
+**Widgets included:**
+
+1. **Lambda Invocations & Errors** (Graph)
+   - Total invocations
+   - Error count
+   - 5-minute intervals
+
+2. **Lambda Duration & Throttles** (Graph)
+   - Average execution time
+   - Throttle events
+
+3. **DynamoDB Operations** (Graph)
+   - Read capacity consumed
+   - Write capacity consumed
+
+4. **DynamoDB Latency & Errors** (Graph)
+   - Request latency
+   - User errors (4xx)
+   - System errors (5xx)
+
+5. **Current Status** (Single Value)
+   - Total invocations (5m window)
+   - Current errors
+
+6. **Performance** (Single Value)
+   - Average duration
+   - P99 duration
+
+### Accessing the Dashboard
+
+The dashboard URL is output after deployment:
+
+```bash
+# Get dashboard URL from CloudFormation outputs
+aws cloudformation describe-stacks \
+  --stack-name {stack-name} \
+  --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' \
+  --output text \
+  --region us-east-2
+```
+
+Or access via AWS Console:
+1. Go to **CloudWatch** → **Dashboards**
+2. Select `ZapierTriggersAPI-{stack-name}`
+
+### Custom Dashboard Widgets
+
+Add your own widgets via AWS Console or CLI:
+
+```bash
+# Export current dashboard
+aws cloudwatch get-dashboard \
+  --dashboard-name ZapierTriggersAPI-{stack-name} \
+  --region us-east-2 > dashboard.json
+
+# Modify dashboard.json with custom widgets
+
+# Update dashboard
+aws cloudwatch put-dashboard \
+  --dashboard-name ZapierTriggersAPI-{stack-name} \
+  --dashboard-body file://dashboard.json \
+  --region us-east-2
+```
+
+## CloudWatch Alarms and SNS Notifications
+
+### Automated Alarms
+
+The following CloudWatch alarms are automatically configured:
+
+#### 1. High Error Rate Alarm
+
+**Trigger**: More than 10 errors in 10 minutes (2 evaluation periods of 5 minutes)
+
+```bash
+# View alarm status
+aws cloudwatch describe-alarms \
+  --alarm-names zapier-api-high-errors-{stack-name} \
+  --region us-east-2
+```
+
+**What triggers it:**
+- Lambda function exceptions
+- HTTP 500 errors
+- Unhandled exceptions
+
+**Action**: Sends email notification via SNS
+
+#### 2. High Duration Alarm
+
+**Trigger**: Average execution time > 10 seconds for 10 minutes
+
+```bash
+# View alarm status
+aws cloudwatch describe-alarms \
+  --alarm-names zapier-api-high-duration-{stack-name} \
+  --region us-east-2
+```
+
+**What triggers it:**
+- Slow DynamoDB queries
+- Secrets Manager timeout
+- Cold starts
+- Heavy payload processing
+
+**Action**: Sends email notification via SNS
+
+#### 3. Throttle Alarm
+
+**Trigger**: Any throttling event
+
+```bash
+# View alarm status
+aws cloudwatch describe-alarms \
+  --alarm-names zapier-api-throttling-{stack-name} \
+  --region us-east-2
+```
+
+**What triggers it:**
+- Lambda concurrent execution limit reached
+- Account-level throttling
+
+**Action**: Sends email notification via SNS
+
+#### 4. DynamoDB Throttle Alarm
+
+**Trigger**: More than 5 DynamoDB user errors in 5 minutes
+
+```bash
+# View alarm status
+aws cloudwatch describe-alarms \
+  --alarm-names zapier-api-dynamo-read-throttle-{stack-name} \
+  --region us-east-2
+```
+
+**What triggers it:**
+- DynamoDB throttling (exceeds capacity)
+- Query syntax errors
+
+**Action**: Sends email notification via SNS
+
+### SNS Topic Configuration
+
+An SNS topic is automatically created for alerts:
+
+**Topic Name**: `zapier-api-alerts-{stack-name}`
+
+#### Subscribe to Alerts
+
+**IMPORTANT**: Update the email subscription after deployment:
+
+```bash
+# Get SNS topic ARN
+TOPIC_ARN=$(aws cloudformation describe-stacks \
+  --stack-name {stack-name} \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlertsTopicArn`].OutputValue' \
+  --output text \
+  --region us-east-2)
+
+# Subscribe your email
+aws sns subscribe \
+  --topic-arn $TOPIC_ARN \
+  --protocol email \
+  --notification-endpoint your-email@example.com \
+  --region us-east-2
+
+# Confirm subscription by clicking link in email
+```
+
+#### Add Multiple Subscriptions
+
+```bash
+# Add SMS notification
+aws sns subscribe \
+  --topic-arn $TOPIC_ARN \
+  --protocol sms \
+  --notification-endpoint +1234567890 \
+  --region us-east-2
+
+# Add webhook notification
+aws sns subscribe \
+  --topic-arn $TOPIC_ARN \
+  --protocol https \
+  --notification-endpoint https://your-webhook.com/alerts \
+  --region us-east-2
+```
+
+#### Test Alerts
+
+```bash
+# Manually trigger an alarm to test notifications
+aws cloudwatch set-alarm-state \
+  --alarm-name zapier-api-high-errors-{stack-name} \
+  --state-value ALARM \
+  --state-reason "Testing alert system" \
+  --region us-east-2
+
+# Reset alarm
+aws cloudwatch set-alarm-state \
+  --alarm-name zapier-api-high-errors-{stack-name} \
+  --state-value OK \
+  --state-reason "Test complete" \
+  --region us-east-2
+```
 
 ## CloudWatch Log Groups
 
@@ -104,97 +443,26 @@ aws cloudwatch get-metric-statistics \
 
 ### Custom Metrics
 
-The API automatically publishes custom metrics to CloudWatch through a FastAPI middleware. All metrics are published to the `ZapierTriggersAPI` namespace.
+You can add custom metrics using CloudWatch SDK in your Lambda code:
 
-#### Available Custom Metrics
+```python
+import boto3
 
-**1. ApiLatency** (Milliseconds)
-- **Description**: Request duration from receipt to response
-- **Use Case**: Monitor ingestion latency for POST /events endpoint
-- **Dimensions**: Endpoint, Method, StatusCode
-- **Target**: P95 < 500ms, Alert if > 1000ms
+cloudwatch = boto3.client('cloudwatch', region_name='us-east-2')
 
-**2. ApiRequests** (Count)
-- **Description**: Total number of API requests
-- **Dimensions**: Endpoint, Method, StatusCode
-- **Use Case**: Track throughput and usage patterns
-
-**3. ApiErrors** (Count)
-- **Description**: Total error count (4xx + 5xx responses)
-- **Dimensions**: Endpoint, Method, StatusCode
-- **Use Case**: Monitor overall API health
-- **Target**: < 1% error rate
-
-**4. Api4xxErrors** (Count)
-- **Description**: Client error count (400-499 status codes)
-- **Dimensions**: Endpoint, Method, StatusCode
-- **Use Case**: Track authentication failures, invalid requests
-- **Common Causes**: Invalid JWT tokens, malformed requests
-
-**5. Api5xxErrors** (Count)
-- **Description**: Server error count (500-599 status codes)
-- **Dimensions**: Endpoint, Method, StatusCode
-- **Use Case**: Track infrastructure issues, bugs
-- **Target**: Should be 0 - alert immediately
-
-**6. ApiAvailability** (Count)
-- **Description**: Success/failure indicator (1 for success, 0 for failure)
-- **Dimensions**: Endpoint
-- **Use Case**: Calculate uptime percentage
-- **Target**: > 99.9% availability
-
-#### Viewing Custom Metrics
-
-**Via AWS Console:**
-1. Go to CloudWatch → Metrics
-2. Select "Custom namespaces" → "ZapierTriggersAPI"
-3. Choose metric and dimensions to visualize
-
-**Via AWS CLI:**
-```bash
-# Get API latency statistics (last hour)
-aws cloudwatch get-metric-statistics \
-  --namespace ZapierTriggersAPI \
-  --metric-name ApiLatency \
-  --dimensions Name=Endpoint,Value=/events Name=Method,Value=POST \
-  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 300 \
-  --statistics Average,Maximum,Minimum \
-  --region us-east-2
-
-# Get error rate (last hour)
-aws cloudwatch get-metric-statistics \
-  --namespace ZapierTriggersAPI \
-  --metric-name ApiErrors \
-  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 300 \
-  --statistics Sum \
-  --region us-east-2
-
-# Get API request count by endpoint
-aws cloudwatch get-metric-statistics \
-  --namespace ZapierTriggersAPI \
-  --metric-name ApiRequests \
-  --dimensions Name=Endpoint,Value=/events \
-  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 300 \
-  --statistics Sum \
-  --region us-east-2
+# Publish custom metric
+cloudwatch.put_metric_data(
+    Namespace='ZapierTriggersAPI',
+    MetricData=[
+        {
+            'MetricName': 'EventsProcessed',
+            'Value': 1,
+            'Unit': 'Count',
+            'Timestamp': datetime.utcnow()
+        }
+    ]
+)
 ```
-
-#### Metric Implementation Details
-
-Custom metrics are published via FastAPI middleware that:
-- Measures request duration using `time.perf_counter()`
-- Captures endpoint path, HTTP method, and status code
-- Publishes metrics asynchronously to avoid impacting response time
-- Uses "fire and forget" pattern - metric failures don't affect API responses
-- Adds `X-Process-Time` header to all responses
-
-**Source Code:** `amplify/functions/api/main.py` - See `cloudwatch_metrics_middleware()` and `publish_request_metrics()`
 
 ## DynamoDB Metrics
 
@@ -217,314 +485,6 @@ aws cloudwatch get-metric-statistics \
   --period 300 \
   --statistics Sum \
   --region us-east-2
-```
-
-## CloudWatch Alarms
-
-### Setting Up Alarms
-
-CloudWatch alarms monitor metrics and trigger notifications when thresholds are breached. Configure alarms for both built-in Lambda metrics and custom API metrics.
-
-#### Custom API Metrics Alarms
-
-##### 1. High Ingestion Latency Alarm
-
-Alert when POST /events response time exceeds 1 second:
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-high-ingestion-latency \
-  --alarm-description "Alert when ingestion latency exceeds 1 second" \
-  --metric-name ApiLatency \
-  --namespace ZapierTriggersAPI \
-  --statistic Average \
-  --period 300 \
-  --threshold 1000 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2 \
-  --dimensions Name=Endpoint,Value=/events Name=Method,Value=POST \
-  --treat-missing-data notBreaching \
-  --region us-east-2
-```
-
-##### 2. High API Error Rate Alarm
-
-Alert when API error rate exceeds 1%:
-
-```bash
-# First, create a metric math alarm that calculates error rate
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-high-error-rate \
-  --alarm-description "Alert when API error rate exceeds 1%" \
-  --evaluation-periods 2 \
-  --threshold 1 \
-  --comparison-operator GreaterThanThreshold \
-  --treat-missing-data notBreaching \
-  --metrics '[
-    {
-      "Id": "errors",
-      "ReturnData": false,
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "ZapierTriggersAPI",
-          "MetricName": "ApiErrors"
-        },
-        "Period": 300,
-        "Stat": "Sum"
-      }
-    },
-    {
-      "Id": "requests",
-      "ReturnData": false,
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "ZapierTriggersAPI",
-          "MetricName": "ApiRequests"
-        },
-        "Period": 300,
-        "Stat": "Sum"
-      }
-    },
-    {
-      "Id": "error_rate",
-      "Expression": "(errors / requests) * 100",
-      "Label": "Error Rate (%)",
-      "ReturnData": true
-    }
-  ]' \
-  --region us-east-2
-```
-
-##### 3. High 5xx Error Alarm
-
-Alert immediately on any 5xx server errors:
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-5xx-errors \
-  --alarm-description "Alert on any 5xx server errors" \
-  --metric-name Api5xxErrors \
-  --namespace ZapierTriggersAPI \
-  --statistic Sum \
-  --period 60 \
-  --threshold 1 \
-  --comparison-operator GreaterThanOrEqualToThreshold \
-  --evaluation-periods 1 \
-  --treat-missing-data notBreaching \
-  --region us-east-2
-```
-
-##### 4. API Availability Alarm
-
-Alert when API availability drops below 99%:
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-low-availability \
-  --alarm-description "Alert when API availability drops below 99%" \
-  --evaluation-periods 2 \
-  --threshold 99 \
-  --comparison-operator LessThanThreshold \
-  --treat-missing-data notBreaching \
-  --metrics '[
-    {
-      "Id": "success",
-      "ReturnData": false,
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "ZapierTriggersAPI",
-          "MetricName": "ApiAvailability"
-        },
-        "Period": 300,
-        "Stat": "Sum"
-      }
-    },
-    {
-      "Id": "total",
-      "ReturnData": false,
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "ZapierTriggersAPI",
-          "MetricName": "ApiRequests"
-        },
-        "Period": 300,
-        "Stat": "Sum"
-      }
-    },
-    {
-      "Id": "availability",
-      "Expression": "(success / total) * 100",
-      "Label": "Availability (%)",
-      "ReturnData": true
-    }
-  ]' \
-  --region us-east-2
-```
-
-#### Lambda Metrics Alarms
-
-##### 5. High Lambda Error Rate Alarm
-
-Alert when Lambda errors exceed threshold:
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-lambda-high-error-rate \
-  --alarm-description "Alert when Lambda error rate is high" \
-  --metric-name Errors \
-  --namespace AWS/Lambda \
-  --statistic Sum \
-  --period 300 \
-  --threshold 10 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2 \
-  --dimensions Name=FunctionName,Value=amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL \
-  --treat-missing-data notBreaching \
-  --region us-east-2
-```
-
-##### 6. High Lambda Duration Alarm
-
-Alert when Lambda execution time is too long:
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-lambda-high-duration \
-  --alarm-description "Alert when Lambda execution time exceeds 10 seconds" \
-  --metric-name Duration \
-  --namespace AWS/Lambda \
-  --statistic Average \
-  --period 300 \
-  --threshold 10000 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2 \
-  --dimensions Name=FunctionName,Value=amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL \
-  --treat-missing-data notBreaching \
-  --region us-east-2
-```
-
-##### 7. Lambda Throttling Alarm
-
-Alert when Lambda is being throttled:
-
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-lambda-throttling \
-  --alarm-description "Alert when Lambda is being throttled" \
-  --metric-name Throttles \
-  --namespace AWS/Lambda \
-  --statistic Sum \
-  --period 60 \
-  --threshold 1 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 1 \
-  --dimensions Name=FunctionName,Value=amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL \
-  --treat-missing-data notBreaching \
-  --region us-east-2
-```
-
-#### Quick Setup: Create All Alarms
-
-Create a script to set up all alarms at once:
-
-```bash
-#!/bin/bash
-# setup-alarms.sh - Create all CloudWatch alarms for Zapier Triggers API
-
-REGION="us-east-2"
-LAMBDA_FUNCTION="amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL"
-
-echo "Creating CloudWatch alarms..."
-
-# 1. High Ingestion Latency
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-high-ingestion-latency \
-  --alarm-description "Alert when ingestion latency exceeds 1 second" \
-  --metric-name ApiLatency \
-  --namespace ZapierTriggersAPI \
-  --statistic Average \
-  --period 300 \
-  --threshold 1000 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2 \
-  --dimensions Name=Endpoint,Value=/events Name=Method,Value=POST \
-  --treat-missing-data notBreaching \
-  --region $REGION
-
-# 3. High 5xx Errors
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-5xx-errors \
-  --alarm-description "Alert on any 5xx server errors" \
-  --metric-name Api5xxErrors \
-  --namespace ZapierTriggersAPI \
-  --statistic Sum \
-  --period 60 \
-  --threshold 1 \
-  --comparison-operator GreaterThanOrEqualToThreshold \
-  --evaluation-periods 1 \
-  --treat-missing-data notBreaching \
-  --region $REGION
-
-# 5. Lambda High Error Rate
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-lambda-high-error-rate \
-  --alarm-description "Alert when Lambda error rate is high" \
-  --metric-name Errors \
-  --namespace AWS/Lambda \
-  --statistic Sum \
-  --period 300 \
-  --threshold 10 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2 \
-  --dimensions Name=FunctionName,Value=$LAMBDA_FUNCTION \
-  --treat-missing-data notBreaching \
-  --region $REGION
-
-# 7. Lambda Throttling
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-lambda-throttling \
-  --alarm-description "Alert when Lambda is being throttled" \
-  --metric-name Throttles \
-  --namespace AWS/Lambda \
-  --statistic Sum \
-  --period 60 \
-  --threshold 1 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 1 \
-  --dimensions Name=FunctionName,Value=$LAMBDA_FUNCTION \
-  --treat-missing-data notBreaching \
-  --region $REGION
-
-echo "✓ All alarms created successfully!"
-echo "Note: Configure SNS notifications separately using the instructions below."
-```
-
-Save this as `scripts/setup-alarms.sh` and run:
-```bash
-chmod +x scripts/setup-alarms.sh
-./scripts/setup-alarms.sh
-```
-
-### Alarm Actions
-
-To receive notifications, configure SNS topics:
-
-```bash
-# Create SNS topic
-aws sns create-topic --name zapier-api-alerts --region us-east-2
-
-# Subscribe email to topic
-aws sns subscribe \
-  --topic-arn arn:aws:sns:us-east-2:971422717446:zapier-api-alerts \
-  --protocol email \
-  --notification-endpoint your-email@example.com \
-  --region us-east-2
-
-# Add alarm action
-aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-high-error-rate \
-  --alarm-actions arn:aws:sns:us-east-2:971422717446:zapier-api-alerts \
-  ...other parameters...
 ```
 
 ## Log Insights Queries
@@ -566,6 +526,17 @@ fields @timestamp, @maxMemoryUsed / 1024 / 1024 as memoryUsedMB
 | limit 20
 ```
 
+#### 5. X-Ray Trace IDs
+
+```sql
+fields @timestamp, @message
+| filter @message like /X-Amzn-Trace-Id/
+| parse @message /X-Amzn-Trace-Id: Root=(?<traceId>[^;]+)/
+| display @timestamp, traceId
+| sort @timestamp desc
+| limit 20
+```
+
 ### Run Query via CLI
 
 ```bash
@@ -581,39 +552,6 @@ QUERY_ID=$(aws logs start-query \
 # Get results
 aws logs get-query-results --query-id $QUERY_ID --region us-east-2
 ```
-
-## Monitoring Dashboard
-
-### Create CloudWatch Dashboard
-
-```bash
-aws cloudwatch put-dashboard \
-  --dashboard-name ZapierTriggersAPI \
-  --region us-east-2 \
-  --dashboard-body '{
-    "widgets": [
-      {
-        "type": "metric",
-        "properties": {
-          "metrics": [
-            ["AWS/Lambda", "Invocations", {"stat": "Sum"}],
-            [".", "Errors", {"stat": "Sum"}],
-            [".", "Duration", {"stat": "Average"}]
-          ],
-          "period": 300,
-          "stat": "Average",
-          "region": "us-east-2",
-          "title": "Lambda Metrics",
-          "dimensions": {
-            "FunctionName": "amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL"
-          }
-        }
-      }
-    ]
-  }'
-```
-
-View dashboard: https://console.aws.amazon.com/cloudwatch/home?region=us-east-2#dashboards:name=ZapierTriggersAPI
 
 ## Performance Monitoring
 
@@ -642,7 +580,7 @@ View dashboard: https://console.aws.amazon.com/cloudwatch/home?region=us-east-2#
 ### Performance Best Practices
 
 - Keep Lambda warm with provisioned concurrency if needed
-- Monitor cold start duration
+- Monitor cold start duration via X-Ray
 - Optimize DynamoDB queries (use GSI effectively)
 - Cache Secrets Manager calls (already implemented)
 - Monitor Lambda memory usage and right-size
@@ -670,6 +608,7 @@ aws cloudwatch get-metric-statistics \
 - DynamoDB: Pay per request (on-demand)
 - CloudWatch Logs: $0.50 per GB ingested
 - Secrets Manager: $0.40 per secret per month
+- X-Ray: $5 per 1M traces recorded, $0.50 per 1M traces retrieved
 
 ## Troubleshooting
 
@@ -678,18 +617,20 @@ aws cloudwatch get-metric-statistics \
 #### High Error Rate
 
 1. Check CloudWatch logs for error messages
-2. Review recent code changes
-3. Check DynamoDB table status
-4. Verify Secrets Manager access
-5. Check Lambda timeout settings
+2. Review X-Ray traces for failed requests
+3. Check recent code changes
+4. Verify DynamoDB table status
+5. Verify Secrets Manager access
+6. Check Lambda timeout settings
 
 #### High Latency
 
-1. Check Lambda memory allocation
-2. Review DynamoDB query patterns
-3. Check for cold starts
-4. Verify network issues
-5. Profile slow code paths
+1. Use X-Ray to identify slow subsegments
+2. Check Lambda memory allocation
+3. Review DynamoDB query patterns
+4. Check for cold starts in X-Ray
+5. Verify network issues
+6. Profile slow code paths
 
 #### Throttling
 
@@ -722,9 +663,10 @@ aws cloudtrail lookup-events \
 ### Daily
 - Check for errors in CloudWatch logs
 - Review Lambda invocation counts
+- Check alarm status
 
 ### Weekly
-- Review performance metrics
+- Review performance metrics and X-Ray traces
 - Check alarm status
 - Analyze slow queries
 
@@ -740,6 +682,8 @@ aws cloudtrail lookup-events \
 - [Lambda Monitoring](https://docs.aws.amazon.com/lambda/latest/dg/monitoring-functions.html)
 - [DynamoDB Monitoring](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/monitoring-cloudwatch.html)
 - [CloudWatch Alarms](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/AlarmThatSendsEmail.html)
+- [AWS X-Ray Documentation](https://docs.aws.amazon.com/xray/latest/devguide/)
+- [X-Ray SDK for Python](https://docs.aws.amazon.com/xray/latest/devguide/xray-sdk-python.html)
 
 ---
 

@@ -347,16 +347,41 @@ app.add_middleware(
 
 # Request/Response Models
 class Event(BaseModel):
+    """Event ingestion request model"""
     type: str
     source: str
     payload: dict
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "type": "user.created",
+                "source": "web-app",
+                "payload": {
+                    "user_id": "12345",
+                    "email": "user@example.com",
+                    "name": "John Doe"
+                }
+            }
+        }
+
 class EventResponse(BaseModel):
+    """Event creation response model"""
     id: str
     status: str
     timestamp: str
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "pending",
+                "timestamp": "2024-01-15T10:30:00Z"
+            }
+        }
+
 class InboxEvent(BaseModel):
+    """Inbox event model with full details"""
     id: str
     type: str
     source: str
@@ -364,6 +389,22 @@ class InboxEvent(BaseModel):
     status: str
     created_at: str
     updated_at: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "type": "user.created",
+                "source": "web-app",
+                "payload": {
+                    "user_id": "12345",
+                    "email": "user@example.com"
+                },
+                "status": "pending",
+                "created_at": "2024-01-15T10:30:00Z",
+                "updated_at": "2024-01-15T10:30:00Z"
+            }
+        }
 
 
 # Dependency to inject JWT secret from AWS Secrets Manager

@@ -393,6 +393,280 @@ For issues or questions:
 3. Check CloudWatch logs for Lambda errors
 4. Consult AWS Amplify documentation: https://docs.amplify.aws
 
+## Blue-Green Deployment Strategy
+
+### Overview
+
+Blue-green deployment is a strategy that minimizes downtime and risk by running two identical production environments. At any time, only one environment (e.g., "blue") serves live production traffic, while the other (e.g., "green") is idle or running the new version.
+
+### Benefits
+
+- **Zero-downtime deployments**: Switch traffic instantly between environments
+- **Quick rollback**: Revert to previous version by switching back to old environment
+- **Testing in production-like environment**: Validate new version before switching traffic
+- **Reduced risk**: New version is fully deployed and tested before receiving traffic
+
+### Implementation Options for Zapier Triggers API
+
+#### Option 1: AWS Amplify Multi-Branch Deployment (Current Setup)
+
+**How it works:**
+- Maintain two long-lived branches: `main` (blue) and `staging` (green)
+- Deploy both environments simultaneously
+- Use DNS or load balancer to switch traffic between environments
+
+**Steps:**
+
+1. **Setup Green Environment:**
+   ```bash
+   # Create staging branch from main
+   git checkout -b staging main
+   git push origin staging
+
+   # In Amplify Console, connect staging branch
+   # This creates a separate stack with isolated resources
+   ```
+
+2. **Deploy New Version to Green:**
+   ```bash
+   # Develop and test on dev branch first
+   git checkout dev
+   # ... make changes ...
+   git push origin dev
+
+   # When ready, merge to staging (green environment)
+   git checkout staging
+   git merge dev
+   git push origin staging
+
+   # Monitor deployment in Amplify Console
+   ```
+
+3. **Test Green Environment:**
+   ```bash
+   # Get staging API URL from Amplify Console
+   STAGING_URL="https://your-staging-function-url.lambda-url.us-east-2.on.aws"
+
+   # Run health checks
+   curl $STAGING_URL/health
+
+   # Test critical endpoints
+   curl -X POST $STAGING_URL/token \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "username=api&password=your-api-key"
+
+   # Run load tests if needed
+   ```
+
+4. **Switch Traffic (Manual DNS Update):**
+   ```bash
+   # Update your application to point to staging URL
+   # OR update Route53 DNS records to point to staging
+
+   # If using Route53 weighted routing:
+   aws route53 change-resource-record-sets \
+     --hosted-zone-id YOUR_ZONE_ID \
+     --change-batch file://traffic-switch.json
+   ```
+
+5. **Monitor and Verify:**
+   ```bash
+   # Watch CloudWatch logs for new environment
+   aws logs tail /aws/lambda/staging-function-name --follow
+
+   # Check CloudWatch dashboard
+   # Monitor error rates, latency, and throughput
+   ```
+
+6. **Promote Green to Blue:**
+   ```bash
+   # Once validated, update main branch
+   git checkout main
+   git merge staging
+   git push origin main
+
+   # Now main (blue) is the new version
+   ```
+
+#### Option 2: Lambda Aliases and Weighted Routing
+
+**How it works:**
+- Use Lambda aliases to represent blue and green versions
+- Use weighted alias routing to gradually shift traffic
+- Requires custom Lambda alias management
+
+**Implementation:**
+
+1. **Create Lambda Aliases:**
+   ```typescript
+   // Add to backend.ts
+   const blueAlias = new lambda.Alias(stack, 'BlueAlias', {
+     aliasName: 'blue',
+     version: triggersApiFunction.currentVersion,
+   });
+
+   const greenAlias = new lambda.Alias(stack, 'GreenAlias', {
+     aliasName: 'green',
+     version: triggersApiFunction.currentVersion,
+   });
+   ```
+
+2. **Deploy New Version to Green:**
+   ```bash
+   # Deploy changes
+   npx ampx pipeline-deploy --branch main
+
+   # Update green alias to new version
+   aws lambda update-alias \
+     --function-name your-function-name \
+     --name green \
+     --function-version $NEW_VERSION
+   ```
+
+3. **Gradually Shift Traffic:**
+   ```bash
+   # Start with 10% traffic to green
+   aws lambda update-alias \
+     --function-name your-function-name \
+     --name prod \
+     --routing-config AdditionalVersionWeights="{\"green\":0.1}"
+
+   # Monitor CloudWatch metrics
+   # If stable, increase to 50%
+   aws lambda update-alias \
+     --function-name your-function-name \
+     --name prod \
+     --routing-config AdditionalVersionWeights="{\"green\":0.5}"
+
+   # Finally, switch 100% to green
+   aws lambda update-alias \
+     --function-name your-function-name \
+     --name prod \
+     --function-version $GREEN_VERSION
+   ```
+
+#### Option 3: AWS CodeDeploy with Lambda
+
+**How it works:**
+- Use CodeDeploy to automate traffic shifting
+- Supports canary, linear, and all-at-once deployment types
+- Automatic rollback on CloudWatch alarms
+
+**Setup (requires additional configuration):**
+
+1. **Add CodeDeploy to backend.ts:**
+   ```typescript
+   import * as codedeploy from 'aws-cdk-lib/aws-codedeploy';
+
+   // Create deployment group
+   const deploymentGroup = new codedeploy.LambdaDeploymentGroup(stack, 'DeploymentGroup', {
+     alias: blueAlias,
+     deploymentConfig: codedeploy.LambdaDeploymentConfig.CANARY_10PERCENT_5MINUTES,
+     alarms: [errorAlarm, durationAlarm], // Auto-rollback on alarms
+   });
+   ```
+
+2. **Deployment Types:**
+   - **AllAtOnce**: Immediate switch (traditional blue-green)
+   - **Canary10Percent5Minutes**: 10% for 5 min, then 100%
+   - **Linear10PercentEvery3Minutes**: Gradual shift over 30 minutes
+
+### Rollback Procedures
+
+#### Quick Rollback (Amplify)
+
+1. **Via Amplify Console:**
+   - Go to Amplify Console → App → Branch
+   - Find previous successful deployment
+   - Click "Redeploy this version"
+
+2. **Via Git:**
+   ```bash
+   # Revert to previous commit
+   git revert HEAD
+   git push origin main
+
+   # Or force rollback (use with caution)
+   git reset --hard {previous-commit}
+   git push --force origin main
+   ```
+
+#### Instant Rollback (Blue-Green)
+
+```bash
+# If using multi-branch: Switch DNS back to blue environment
+# If using Lambda aliases: Point prod alias back to blue version
+aws lambda update-alias \
+  --function-name your-function-name \
+  --name prod \
+  --function-version $BLUE_VERSION
+```
+
+### Automated Rollback Triggers
+
+The monitoring setup includes automatic rollback triggers:
+
+**CloudWatch Alarms configured:**
+1. Error rate > 10 errors in 10 minutes
+2. Average duration > 10 seconds
+3. Any throttling events
+4. DynamoDB throttling
+
+**To enable automatic rollback:**
+1. Use CodeDeploy with Lambda (Option 3 above)
+2. Configure alarms as rollback triggers
+3. CodeDeploy will automatically revert on alarm
+
+**Manual monitoring approach:**
+```bash
+# Create CloudWatch alarm that triggers SNS
+# SNS can trigger Lambda function to execute rollback
+# Or use SNS to alert team for manual rollback
+```
+
+### Best Practices
+
+1. **Always test in green before switching:**
+   - Run full integration test suite
+   - Perform smoke tests on critical paths
+   - Load test to verify performance
+
+2. **Monitor closely during switchover:**
+   - Watch CloudWatch dashboard
+   - Monitor X-Ray traces for errors
+   - Check application logs
+
+3. **Have rollback plan ready:**
+   - Document rollback steps
+   - Test rollback procedure in dev environment
+   - Keep previous version running until validated
+
+4. **Use gradual traffic shifting:**
+   - Start with 10% traffic to new version
+   - Monitor for 15-30 minutes
+   - Gradually increase if stable
+
+5. **Maintain database compatibility:**
+   - Ensure DB schema changes are backward compatible
+   - Test with both blue and green versions
+   - Use feature flags for breaking changes
+
+### Testing Blue-Green Deployment
+
+**Dry run in dev environment:**
+
+```bash
+# Create test branches
+git checkout -b blue-test
+git checkout -b green-test
+
+# Deploy both
+# Test switching between them
+# Verify rollback works
+
+# Once validated, apply to production
+```
+
 ## Next Steps
 
 After completing initial setup:
@@ -402,3 +676,5 @@ After completing initial setup:
 4. Test API endpoints in dev
 5. Merge to `main` and deploy production
 6. Configure monitoring and alerts
+7. Set up blue-green deployment strategy (choose one of the options above)
+8. Test deployment and rollback procedures
