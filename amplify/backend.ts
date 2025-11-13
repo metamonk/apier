@@ -68,18 +68,11 @@ const apiSecret = new secretsmanager.Secret(stack, 'ApiCredentials', {
 });
 
 // Create Lambda function with Python runtime (FastAPI + Mangum)
+// Dependencies are pre-installed in amplify.yml, so we just package the directory
 const triggersApiFunction = new lambda.Function(stack, 'TriggersApiFunction', {
   runtime: lambda.Runtime.PYTHON_3_12,
   handler: 'main.handler',
-  code: lambda.Code.fromAsset(join(__dirname, 'functions/api'), {
-    bundling: {
-      image: lambda.Runtime.PYTHON_3_12.bundlingImage,
-      command: [
-        'bash', '-c',
-        'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output'
-      ],
-    },
-  }),
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/api')),
   architecture: lambda.Architecture.X86_64,
   memorySize: 512,
   timeout: cdk.Duration.seconds(30),
