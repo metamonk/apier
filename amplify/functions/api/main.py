@@ -1,12 +1,14 @@
 """
 Zapier Triggers API - FastAPI Backend
 Endpoints: POST /events, GET /inbox, POST /inbox/{id}/ack
+Includes JWT Bearer token authentication for API security.
 """
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import os
 import uuid
@@ -14,6 +16,15 @@ import json
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+
+# Import authentication utilities
+import auth
+from auth import (
+    Token,
+    User,
+    create_access_token,
+    authenticate_api_key
+)
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
@@ -121,7 +132,93 @@ class InboxEvent(BaseModel):
     created_at: str
     updated_at: str
 
-# Health check endpoint
+
+# Dependency to inject JWT secret from AWS Secrets Manager
+def get_jwt_secret() -> str:
+    """Get JWT secret from AWS Secrets Manager."""
+    if not secret_arn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SECRET_ARN environment variable not configured"
+        )
+    secrets = get_secret(secret_arn)
+    jwt_secret = secrets.get("jwt_secret")
+    if not jwt_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT secret not found in secrets manager"
+        )
+    return jwt_secret
+
+
+# Dependency to get current authenticated user with JWT secret injection
+async def get_authenticated_user(
+    token: str = Depends(auth.oauth2_scheme),
+    jwt_secret: str = Depends(get_jwt_secret)
+) -> User:
+    """Get the current authenticated user by validating the JWT token."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = auth.decode_access_token(token, jwt_secret)
+        username: str = payload.get("sub")
+
+        if username is None:
+            raise credentials_exception
+
+        # Return user from token claims
+        user = User(username=username, disabled=False)
+        return user
+    except Exception:
+        raise credentials_exception
+
+
+# Authentication endpoint
+@app.post("/token", response_model=Token)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    jwt_secret: str = Depends(get_jwt_secret)
+):
+    """
+    OAuth2 compatible token endpoint.
+    Authenticate with API key and receive a JWT bearer token.
+
+    The username should be "api" and the password should be the Zapier API key.
+    """
+    # Get stored API key from secrets
+    secrets = get_secret(secret_arn)
+    stored_api_key = secrets.get("zapier_api_key")
+
+    if not stored_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="API key not configured in secrets manager"
+        )
+
+    # Validate credentials
+    if form_data.username != "api" or not authenticate_api_key(form_data.password, stored_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Create JWT token
+    access_token_expires = timedelta(hours=24)
+    access_token = create_access_token(
+        data={"sub": form_data.username, "api_key": stored_api_key[:8] + "..."},
+        secret_key=jwt_secret,
+        expires_delta=access_token_expires
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+# Health check endpoint (public - no authentication required)
 @app.get("/")
 def read_root():
     return {
@@ -167,12 +264,17 @@ async def get_config():
             detail=f"Failed to retrieve configuration: {str(e)}"
         )
 
-# POST /events - Ingest new event
+# POST /events - Ingest new event (protected endpoint)
 @app.post("/events", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
-async def create_event(event: Event):
+async def create_event(
+    event: Event,
+    current_user: User = Depends(get_authenticated_user)
+):
     """
     Ingest a new event into the system.
     Returns event ID, status, and timestamp.
+
+    Requires authentication via JWT bearer token.
     """
     # Generate unique event ID
     event_id = str(uuid.uuid4())
@@ -203,11 +305,13 @@ async def create_event(event: Event):
         timestamp=timestamp
     )
 
-# GET /inbox - Retrieve undelivered events
+# GET /inbox - Retrieve undelivered events (protected endpoint)
 @app.get("/inbox", response_model=List[InboxEvent])
-async def get_inbox():
+async def get_inbox(current_user: User = Depends(get_authenticated_user)):
     """
     Retrieve all undelivered events from the inbox.
+
+    Requires authentication via JWT bearer token.
     """
     try:
         # Query GSI for pending events
@@ -237,12 +341,17 @@ async def get_inbox():
             detail=f"Failed to retrieve inbox: {str(e)}"
         )
 
-# POST /inbox/{event_id}/ack - Acknowledge event delivery
+# POST /inbox/{event_id}/ack - Acknowledge event delivery (protected endpoint)
 @app.post("/inbox/{event_id}/ack")
-async def acknowledge_event(event_id: str):
+async def acknowledge_event(
+    event_id: str,
+    current_user: User = Depends(get_authenticated_user)
+):
     """
     Acknowledge successful delivery of an event.
     Updates event status to 'delivered'.
+
+    Requires authentication via JWT bearer token.
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
 

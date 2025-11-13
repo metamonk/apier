@@ -216,12 +216,32 @@ All infrastructure is defined in code within the `amplify/` directory:
 - Changes are deployed via Git push
 - No manual AWS Console configuration required
 
-## Security Considerations
+## Security
 
-- Lambda Function URL has CORS enabled for all origins (configure for production)
-- Secrets are stored in AWS Secrets Manager with auto-generated JWT secrets
-- DynamoDB table has Point-in-Time Recovery enabled
-- Resources have `RemovalPolicy.RETAIN` to prevent accidental data loss
+The API implements comprehensive security measures:
+
+- ✅ **TLS/HTTPS Encryption**: All traffic encrypted (Lambda Function URLs are HTTPS-only)
+- ✅ **JWT Bearer Token Authentication**: Stateless token-based authentication for API access
+- ✅ **AWS Secrets Manager**: Secure storage of API keys and JWT secrets
+- ✅ **IAM Role-Based Access**: Least privilege access to AWS resources
+- ✅ **Password Hashing**: Argon2id for secure password storage
+
+### Quick Start - Authentication
+
+```bash
+# 1. Get JWT token
+curl -X POST "https://YOUR_FUNCTION_URL/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=api&password=YOUR_API_KEY"
+
+# 2. Use token for API requests
+curl -X POST "https://YOUR_FUNCTION_URL/events" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type": "event.type", "source": "app", "payload": {}}'
+```
+
+**See [SECURITY.md](./SECURITY.md) for comprehensive security documentation.**
 
 ## Troubleshooting
 
