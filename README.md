@@ -144,6 +144,40 @@ Base URL: `{FunctionURL}` (provided after deployment)
 
 Currently uses API key authentication stored in AWS Secrets Manager.
 
+## Testing
+
+The API includes comprehensive unit tests for all endpoints with 80%+ code coverage.
+
+### Running Tests
+
+```bash
+# Install test dependencies
+pnpm test:install
+
+# Run all tests
+pnpm test
+
+# Run with coverage report
+pnpm test:cov
+
+# Run verbose output
+pnpm test:verbose
+```
+
+### Test Coverage
+
+- ✅ Health check endpoints (`/`, `/health`)
+- ✅ Configuration endpoint (`/config`)
+- ✅ Event creation (`POST /events`)
+- ✅ Inbox retrieval (`GET /inbox`)
+- ✅ Event acknowledgment (`POST /inbox/{id}/ack`)
+- ✅ End-to-end workflows
+- ✅ Error handling and validation
+
+Tests use **moto** to mock AWS services (DynamoDB, Secrets Manager) for isolated, fast execution without AWS costs.
+
+**See [TESTING.md](./TESTING.md) for detailed testing documentation.**
+
 ## Secrets Management
 
 API credentials are stored in AWS Secrets Manager:

@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "cd amplify/functions/api && pytest",
+    "test:watch": "cd amplify/functions/api && pytest-watch",
+    "test:cov": "cd amplify/functions/api && pytest --cov=. --cov-report=term-missing --cov-report=html",
+    "test:install": "cd amplify/functions/api && pip install -r requirements-dev.txt",
+    "test:verbose": "cd amplify/functions/api && pytest -vv"
   },
   "keywords": [],
   "author": "",
