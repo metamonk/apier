@@ -6,6 +6,7 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cdk from 'aws-cdk-lib';
 import { RemovalPolicy } from 'aws-cdk-lib';
 import { fileURLToPath } from 'url';
@@ -96,6 +97,13 @@ eventsTable.grantReadWriteData(triggersApiFunction);
 
 // Grant Lambda permissions to read secrets
 apiSecret.grantRead(triggersApiFunction);
+
+// Grant Lambda permissions to publish CloudWatch custom metrics
+triggersApiFunction.addToRolePolicy(new iam.PolicyStatement({
+  effect: iam.Effect.ALLOW,
+  actions: ['cloudwatch:PutMetricData'],
+  resources: ['*'],
+}));
 
 // Create Function URL for the Lambda (simpler than API Gateway for this use case)
 const functionUrl = triggersApiFunction.addFunctionUrl({
