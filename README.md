@@ -176,7 +176,7 @@ pnpm test:verbose
 
 Tests use **moto** to mock AWS services (DynamoDB, Secrets Manager) for isolated, fast execution without AWS costs.
 
-**See [TESTING.md](./TESTING.md) for detailed testing documentation.**
+**See [docs/TESTING.md](./docs/TESTING.md) for detailed testing documentation.**
 
 ## Secrets Management
 
@@ -241,7 +241,7 @@ curl -X POST "https://YOUR_FUNCTION_URL/events" \
   -d '{"type": "event.type", "source": "app", "payload": {}}'
 ```
 
-**See [SECURITY.md](./SECURITY.md) for comprehensive security documentation.**
+**See [docs/SECURITY.md](./docs/SECURITY.md) for comprehensive security documentation.**
 
 ## GDPR & CCPA Compliance
 
@@ -255,7 +255,18 @@ The API implements data retention policies for regulatory compliance:
 
 **Data Retention**: All events are automatically deleted 90 days after creation using DynamoDB Time-To-Live (TTL).
 
-**See [COMPLIANCE.md](./COMPLIANCE.md) for comprehensive compliance documentation.**
+**See [docs/COMPLIANCE.md](./docs/COMPLIANCE.md) for comprehensive compliance documentation.**
+
+## Documentation
+
+Comprehensive guides are available in the `docs/` directory:
+
+- **[DEPLOYMENT.md](./docs/DEPLOYMENT.md)** - CI/CD setup and deployment procedures
+- **[SECURITY.md](./docs/SECURITY.md)** - Authentication, authorization, and security best practices
+- **[SECRETS.md](./docs/SECRETS.md)** - AWS Secrets Manager configuration and rotation
+- **[MONITORING.md](./docs/MONITORING.md)** - CloudWatch logs, metrics, and alerting
+- **[TESTING.md](./docs/TESTING.md)** - Test suite, coverage, and testing procedures
+- **[COMPLIANCE.md](./docs/COMPLIANCE.md)** - GDPR/CCPA compliance and data retention
 
 ## Troubleshooting
 
