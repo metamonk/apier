@@ -16,12 +16,12 @@ from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 # Initialize DynamoDB client
-dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 table_name = os.environ.get('DYNAMODB_TABLE_NAME', 'zapier-triggers-events')
 table = dynamodb.Table(table_name)
 
 # Initialize Secrets Manager client
-secrets_client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+secrets_client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
 secret_arn = os.environ.get('SECRET_ARN')
 
 # Global cache for secrets (Lambda container reuse optimization)
