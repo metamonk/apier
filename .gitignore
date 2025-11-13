@@ -35,3 +35,8 @@ node_modules/
 
 # Claude Code instructions (personal workflow)
 CLAUDE.md 
+
+# amplify
+.amplify
+amplify_outputs*
+amplifyconfiguration*
