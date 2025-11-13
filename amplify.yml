@@ -4,7 +4,7 @@ backend:
     preBuild:
       commands:
         - npm install -g pnpm
-        - pip install -r amplify/functions/api/requirements.txt -t amplify/functions/api/
+        - pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/api/requirements.txt -t amplify/functions/api/
     build:
       commands:
         - pnpm install --frozen-lockfile
