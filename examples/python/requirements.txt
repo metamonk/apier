@@ -1,0 +1,11 @@
+# Zapier Triggers API - Python Client Requirements
+
+# HTTP client library
+requests>=2.31.0
+
+# Optional: for better development experience
+python-dotenv>=1.0.0  # Load .env files automatically
+
+# Optional: for type checking
+mypy>=1.7.0
+types-requests>=2.31.0

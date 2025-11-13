@@ -123,8 +123,65 @@ apier/
 │   │       └── requirements.txt
 │   └── storage/              # Storage resources
 ├── amplify.yml               # Amplify build configuration
+├── docs/                     # Documentation
+│   ├── QUICKSTART.md        # 5-minute getting started guide
+│   ├── DEVELOPER_GUIDE.md   # Comprehensive developer guide
+│   └── ...                   # Additional documentation
+├── examples/                 # Code examples
+│   ├── curl/                # Bash/curl examples
+│   └── workflows/           # Integration patterns
 └── README.md                # This file
 ```
+
+## Getting Started
+
+### Quick Start (5 Minutes)
+
+New to the API? Follow our quickstart guide to get up and running in 5 minutes:
+
+**[Read the Quickstart Guide →](./docs/QUICKSTART.md)**
+
+**Quick Example:**
+```bash
+# 1. Get JWT token
+export TOKEN=$(curl -s -X POST "https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=api&password=YOUR_API_KEY" | jq -r '.access_token')
+
+# 2. Send an event
+curl -X POST "https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/events" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "user.created",
+    "source": "my-app",
+    "payload": {"user_id": "12345", "email": "user@example.com"}
+  }'
+
+# 3. Check inbox
+curl -X GET "https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/inbox" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Developer Resources
+
+**Essential Documentation:**
+- **[Quickstart Guide](./docs/QUICKSTART.md)** - Get started in 5 minutes
+- **[Developer Guide](./docs/DEVELOPER_GUIDE.md)** - Comprehensive integration guide with code examples
+- **[Security Documentation](./docs/SECURITY.md)** - Authentication, authorization, and security best practices
+- **[Deployment Guide](./docs/DEPLOYMENT.md)** - CI/CD setup and deployment procedures
+- **[Code Examples](./examples/)** - Ready-to-use code samples for common use cases
+
+**API Reference:**
+- **[Interactive API Docs (Swagger UI)](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/docs)** - Test endpoints directly in your browser
+- **[OpenAPI Specification](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/openapi.json)** - Machine-readable API spec
+- **[ReDoc Alternative](https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws/redoc)** - Alternative API documentation
+
+**Operations:**
+- **[Monitoring Guide](./docs/MONITORING.md)** - CloudWatch logs, metrics, and alerting
+- **[SNS Alerts](./docs/SNS_ALERTS.md)** - SNS alert configuration and testing
+- **[Testing Guide](./docs/TESTING.md)** - Test suite, coverage, and testing procedures
+- **[Compliance](./docs/COMPLIANCE.md)** - GDPR/CCPA compliance and data retention
 
 ## API Endpoints
 
@@ -285,17 +342,12 @@ The API implements data retention policies for regulatory compliance:
 
 **See [docs/COMPLIANCE.md](./docs/COMPLIANCE.md) for comprehensive compliance documentation.**
 
-## Documentation
+## Additional Documentation
 
-Comprehensive guides are available in the `docs/` directory:
+For more detailed information, see the following guides in the `docs/` directory:
 
-- **[DEPLOYMENT.md](./docs/DEPLOYMENT.md)** - CI/CD setup and deployment procedures
-- **[SECURITY.md](./docs/SECURITY.md)** - Authentication, authorization, and security best practices
 - **[SECRETS.md](./docs/SECRETS.md)** - AWS Secrets Manager configuration and rotation
-- **[MONITORING.md](./docs/MONITORING.md)** - CloudWatch logs, metrics, and alerting
-- **[SNS_ALERTS.md](./docs/SNS_ALERTS.md)** - SNS alert configuration and testing guide
-- **[TESTING.md](./docs/TESTING.md)** - Test suite, coverage, and testing procedures
-- **[COMPLIANCE.md](./docs/COMPLIANCE.md)** - GDPR/CCPA compliance and data retention
+- **[CLOUDWATCH_METRICS_QUICKSTART.md](./docs/CLOUDWATCH_METRICS_QUICKSTART.md)** - CloudWatch metrics setup
 
 ## Troubleshooting
 

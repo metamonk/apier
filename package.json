@@ -8,7 +8,15 @@
     "test:watch": "cd amplify/functions/api && pytest-watch",
     "test:cov": "cd amplify/functions/api && pytest --cov=. --cov-report=term-missing --cov-report=html",
     "test:install": "cd amplify/functions/api && pip install -r requirements-dev.txt",
-    "test:verbose": "cd amplify/functions/api && pytest -vv"
+    "test:verbose": "cd amplify/functions/api && pytest -vv",
+    "load-test:check": "command -v k6 >/dev/null 2>&1 || { echo 'Error: k6 is not installed. Install with: brew install k6'; exit 1; }",
+    "load-test:setup": "mkdir -p results",
+    "load-test:baseline": "npm run load-test:check && npm run load-test:setup && k6 run --env API_KEY=$API_KEY tests/load/baseline.js",
+    "load-test:moderate": "npm run load-test:check && npm run load-test:setup && k6 run --env API_KEY=$API_KEY tests/load/moderate.js",
+    "load-test:high": "npm run load-test:check && npm run load-test:setup && k6 run --env API_KEY=$API_KEY tests/load/high-load.js",
+    "load-test:spike": "npm run load-test:check && npm run load-test:setup && k6 run --env API_KEY=$API_KEY tests/load/spike.js",
+    "load-test:all": "npm run load-test:baseline && npm run load-test:moderate && npm run load-test:high && npm run load-test:spike",
+    "load-test:report": "node scripts/generate-load-test-report.js"
   },
   "keywords": [],
   "author": "",

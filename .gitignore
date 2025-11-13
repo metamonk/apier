@@ -40,3 +40,8 @@ CLAUDE.md
 .amplify
 amplify_outputs*
 amplifyconfiguration*
+
+# Load test results (keep README only)
+results/*.json
+results/*.html
+results/load-test-report.md
