@@ -300,6 +300,10 @@ async def not_found_handler(request, exc):
 async def internal_error_handler(request, exc):
     return {"error": "Internal server error"}
 
+# Lambda handler using Mangum
+from mangum import Mangum
+handler = Mangum(app, lifespan="off")
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))

@@ -3,8 +3,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as cdk from 'aws-cdk-lib';
-import { RemovalPolicy, SecretValue } from 'aws-cdk-lib';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -68,13 +67,20 @@ const apiSecret = new secretsmanager.Secret(stack, 'ApiCredentials', {
   removalPolicy: RemovalPolicy.RETAIN, // Keep secrets when stack is deleted
 });
 
-// Create Lambda function with Docker (FastAPI + Lambda Web Adapter)
-const triggersApiFunction = new lambda.DockerImageFunction(stack, 'TriggersApiFunction', {
-  // Don't specify functionName - let CDK auto-generate a short one
-  code: lambda.DockerImageCode.fromImageAsset(join(__dirname, 'functions/api'), {
-    platform: Platform.LINUX_AMD64, // Explicitly set x86_64 architecture
+// Create Lambda function with Python runtime (FastAPI + Mangum)
+const triggersApiFunction = new lambda.Function(stack, 'TriggersApiFunction', {
+  runtime: lambda.Runtime.PYTHON_3_12,
+  handler: 'main.handler',
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/api'), {
+    bundling: {
+      image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+      command: [
+        'bash', '-c',
+        'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output'
+      ],
+    },
   }),
-  architecture: lambda.Architecture.X86_64, // Match Lambda architecture
+  architecture: lambda.Architecture.X86_64,
   memorySize: 512,
   timeout: cdk.Duration.seconds(30),
   environment: {
