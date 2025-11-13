@@ -3,8 +3,9 @@ import { auth } from './auth/resource';
 import { data } from './data/resource';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as cdk from 'aws-cdk-lib';
-import { RemovalPolicy } from 'aws-cdk-lib';
+import { RemovalPolicy, SecretValue } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -56,6 +57,22 @@ eventsTable.addGlobalSecondaryIndex({
   },
 });
 
+// Create Secrets Manager secret for API credentials
+const apiSecret = new secretsmanager.Secret(stack, 'ApiCredentials', {
+  secretName: `zapier-api-credentials-${stack.stackName}`,
+  description: 'API keys and webhook URLs for Zapier Triggers API',
+  generateSecretString: {
+    secretStringTemplate: JSON.stringify({
+      zapier_api_key: 'PLACEHOLDER_KEY',
+      zapier_webhook_url: 'https://hooks.zapier.com/placeholder',
+      environment: 'development',
+    }),
+    generateStringKey: 'jwt_secret', // Auto-generate JWT secret
+    excludeCharacters: '/@"\\', // Exclude problematic characters
+  },
+  removalPolicy: RemovalPolicy.RETAIN, // Keep secrets when stack is deleted
+});
+
 // Create Lambda function with Docker (FastAPI + Lambda Web Adapter)
 const triggersApiFunction = new lambda.DockerImageFunction(stack, 'TriggersApiFunction', {
   // Don't specify functionName - let CDK auto-generate a short one
@@ -67,12 +84,16 @@ const triggersApiFunction = new lambda.DockerImageFunction(stack, 'TriggersApiFu
   timeout: cdk.Duration.seconds(30),
   environment: {
     DYNAMODB_TABLE_NAME: eventsTable.tableName,
+    SECRET_ARN: apiSecret.secretArn,
     // AWS_REGION is automatically provided by Lambda runtime
   },
 });
 
 // Grant Lambda permissions to access DynamoDB
 eventsTable.grantReadWriteData(triggersApiFunction);
+
+// Grant Lambda permissions to read secrets
+apiSecret.grantRead(triggersApiFunction);
 
 // Create Function URL for the Lambda (simpler than API Gateway for this use case)
 const functionUrl = triggersApiFunction.addFunctionUrl({
@@ -88,4 +109,10 @@ const functionUrl = triggersApiFunction.addFunctionUrl({
 new cdk.CfnOutput(stack, 'TriggersApiUrl', {
   value: functionUrl.url,
   description: 'Triggers API endpoint URL',
+});
+
+// Output the Secret ARN for reference
+new cdk.CfnOutput(stack, 'ApiSecretArn', {
+  value: apiSecret.secretArn,
+  description: 'ARN of the API credentials secret in Secrets Manager',
 });
