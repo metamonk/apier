@@ -1,6 +1,4 @@
 import { defineBackend } from '@aws-amplify/backend';
-import { auth } from './auth/resource';
-import { data } from './data/resource';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -18,15 +16,12 @@ const __dirname = dirname(__filename);
  * Zapier Triggers API Backend
  * - FastAPI REST API on Lambda
  * - DynamoDB for event storage
- * - API Gateway for HTTP endpoints
+ * - Lambda Function URL for HTTP endpoints
  */
-const backend = defineBackend({
-  auth,
-  data,
-});
+const backend = defineBackend({});
 
 // Get the CDK stack
-const { stack } = backend.auth.resources.userPool;
+const stack = backend.createStack('api-stack');
 
 // Create DynamoDB table for events
 const eventsTable = new dynamodb.Table(stack, 'EventsTable', {
