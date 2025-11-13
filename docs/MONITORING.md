@@ -104,26 +104,97 @@ aws cloudwatch get-metric-statistics \
 
 ### Custom Metrics
 
-You can add custom metrics using CloudWatch SDK in your Lambda code:
+The API automatically publishes custom metrics to CloudWatch through a FastAPI middleware. All metrics are published to the `ZapierTriggersAPI` namespace.
 
-```python
-import boto3
+#### Available Custom Metrics
 
-cloudwatch = boto3.client('cloudwatch', region_name='us-east-2')
+**1. ApiLatency** (Milliseconds)
+- **Description**: Request duration from receipt to response
+- **Use Case**: Monitor ingestion latency for POST /events endpoint
+- **Dimensions**: Endpoint, Method, StatusCode
+- **Target**: P95 < 500ms, Alert if > 1000ms
 
-# Publish custom metric
-cloudwatch.put_metric_data(
-    Namespace='ZapierTriggersAPI',
-    MetricData=[
-        {
-            'MetricName': 'EventsProcessed',
-            'Value': 1,
-            'Unit': 'Count',
-            'Timestamp': datetime.utcnow()
-        }
-    ]
-)
+**2. ApiRequests** (Count)
+- **Description**: Total number of API requests
+- **Dimensions**: Endpoint, Method, StatusCode
+- **Use Case**: Track throughput and usage patterns
+
+**3. ApiErrors** (Count)
+- **Description**: Total error count (4xx + 5xx responses)
+- **Dimensions**: Endpoint, Method, StatusCode
+- **Use Case**: Monitor overall API health
+- **Target**: < 1% error rate
+
+**4. Api4xxErrors** (Count)
+- **Description**: Client error count (400-499 status codes)
+- **Dimensions**: Endpoint, Method, StatusCode
+- **Use Case**: Track authentication failures, invalid requests
+- **Common Causes**: Invalid JWT tokens, malformed requests
+
+**5. Api5xxErrors** (Count)
+- **Description**: Server error count (500-599 status codes)
+- **Dimensions**: Endpoint, Method, StatusCode
+- **Use Case**: Track infrastructure issues, bugs
+- **Target**: Should be 0 - alert immediately
+
+**6. ApiAvailability** (Count)
+- **Description**: Success/failure indicator (1 for success, 0 for failure)
+- **Dimensions**: Endpoint
+- **Use Case**: Calculate uptime percentage
+- **Target**: > 99.9% availability
+
+#### Viewing Custom Metrics
+
+**Via AWS Console:**
+1. Go to CloudWatch → Metrics
+2. Select "Custom namespaces" → "ZapierTriggersAPI"
+3. Choose metric and dimensions to visualize
+
+**Via AWS CLI:**
+```bash
+# Get API latency statistics (last hour)
+aws cloudwatch get-metric-statistics \
+  --namespace ZapierTriggersAPI \
+  --metric-name ApiLatency \
+  --dimensions Name=Endpoint,Value=/events Name=Method,Value=POST \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Average,Maximum,Minimum \
+  --region us-east-2
+
+# Get error rate (last hour)
+aws cloudwatch get-metric-statistics \
+  --namespace ZapierTriggersAPI \
+  --metric-name ApiErrors \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum \
+  --region us-east-2
+
+# Get API request count by endpoint
+aws cloudwatch get-metric-statistics \
+  --namespace ZapierTriggersAPI \
+  --metric-name ApiRequests \
+  --dimensions Name=Endpoint,Value=/events \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum \
+  --region us-east-2
 ```
+
+#### Metric Implementation Details
+
+Custom metrics are published via FastAPI middleware that:
+- Measures request duration using `time.perf_counter()`
+- Captures endpoint path, HTTP method, and status code
+- Publishes metrics asynchronously to avoid impacting response time
+- Uses "fire and forget" pattern - metric failures don't affect API responses
+- Adds `X-Process-Time` header to all responses
+
+**Source Code:** `amplify/functions/api/main.py` - See `cloudwatch_metrics_middleware()` and `publish_request_metrics()`
 
 ## DynamoDB Metrics
 
@@ -152,14 +223,154 @@ aws cloudwatch get-metric-statistics \
 
 ### Setting Up Alarms
 
-#### 1. High Error Rate Alarm
+CloudWatch alarms monitor metrics and trigger notifications when thresholds are breached. Configure alarms for both built-in Lambda metrics and custom API metrics.
+
+#### Custom API Metrics Alarms
+
+##### 1. High Ingestion Latency Alarm
+
+Alert when POST /events response time exceeds 1 second:
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-high-ingestion-latency \
+  --alarm-description "Alert when ingestion latency exceeds 1 second" \
+  --metric-name ApiLatency \
+  --namespace ZapierTriggersAPI \
+  --statistic Average \
+  --period 300 \
+  --threshold 1000 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2 \
+  --dimensions Name=Endpoint,Value=/events Name=Method,Value=POST \
+  --treat-missing-data notBreaching \
+  --region us-east-2
+```
+
+##### 2. High API Error Rate Alarm
+
+Alert when API error rate exceeds 1%:
+
+```bash
+# First, create a metric math alarm that calculates error rate
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-high-error-rate \
+  --alarm-description "Alert when API error rate exceeds 1%" \
+  --evaluation-periods 2 \
+  --threshold 1 \
+  --comparison-operator GreaterThanThreshold \
+  --treat-missing-data notBreaching \
+  --metrics '[
+    {
+      "Id": "errors",
+      "ReturnData": false,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ZapierTriggersAPI",
+          "MetricName": "ApiErrors"
+        },
+        "Period": 300,
+        "Stat": "Sum"
+      }
+    },
+    {
+      "Id": "requests",
+      "ReturnData": false,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ZapierTriggersAPI",
+          "MetricName": "ApiRequests"
+        },
+        "Period": 300,
+        "Stat": "Sum"
+      }
+    },
+    {
+      "Id": "error_rate",
+      "Expression": "(errors / requests) * 100",
+      "Label": "Error Rate (%)",
+      "ReturnData": true
+    }
+  ]' \
+  --region us-east-2
+```
+
+##### 3. High 5xx Error Alarm
+
+Alert immediately on any 5xx server errors:
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-5xx-errors \
+  --alarm-description "Alert on any 5xx server errors" \
+  --metric-name Api5xxErrors \
+  --namespace ZapierTriggersAPI \
+  --statistic Sum \
+  --period 60 \
+  --threshold 1 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --evaluation-periods 1 \
+  --treat-missing-data notBreaching \
+  --region us-east-2
+```
+
+##### 4. API Availability Alarm
+
+Alert when API availability drops below 99%:
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-low-availability \
+  --alarm-description "Alert when API availability drops below 99%" \
+  --evaluation-periods 2 \
+  --threshold 99 \
+  --comparison-operator LessThanThreshold \
+  --treat-missing-data notBreaching \
+  --metrics '[
+    {
+      "Id": "success",
+      "ReturnData": false,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ZapierTriggersAPI",
+          "MetricName": "ApiAvailability"
+        },
+        "Period": 300,
+        "Stat": "Sum"
+      }
+    },
+    {
+      "Id": "total",
+      "ReturnData": false,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ZapierTriggersAPI",
+          "MetricName": "ApiRequests"
+        },
+        "Period": 300,
+        "Stat": "Sum"
+      }
+    },
+    {
+      "Id": "availability",
+      "Expression": "(success / total) * 100",
+      "Label": "Availability (%)",
+      "ReturnData": true
+    }
+  ]' \
+  --region us-east-2
+```
+
+#### Lambda Metrics Alarms
+
+##### 5. High Lambda Error Rate Alarm
 
 Alert when Lambda errors exceed threshold:
 
 ```bash
 aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-high-error-rate \
-  --alarm-description "Alert when API error rate is high" \
+  --alarm-name zapier-api-lambda-high-error-rate \
+  --alarm-description "Alert when Lambda error rate is high" \
   --metric-name Errors \
   --namespace AWS/Lambda \
   --statistic Sum \
@@ -168,17 +379,18 @@ aws cloudwatch put-metric-alarm \
   --comparison-operator GreaterThanThreshold \
   --evaluation-periods 2 \
   --dimensions Name=FunctionName,Value=amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL \
+  --treat-missing-data notBreaching \
   --region us-east-2
 ```
 
-#### 2. High Duration Alarm
+##### 6. High Lambda Duration Alarm
 
 Alert when Lambda execution time is too long:
 
 ```bash
 aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-high-duration \
-  --alarm-description "Alert when API execution time exceeds 10 seconds" \
+  --alarm-name zapier-api-lambda-high-duration \
+  --alarm-description "Alert when Lambda execution time exceeds 10 seconds" \
   --metric-name Duration \
   --namespace AWS/Lambda \
   --statistic Average \
@@ -187,17 +399,18 @@ aws cloudwatch put-metric-alarm \
   --comparison-operator GreaterThanThreshold \
   --evaluation-periods 2 \
   --dimensions Name=FunctionName,Value=amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL \
+  --treat-missing-data notBreaching \
   --region us-east-2
 ```
 
-#### 3. Throttling Alarm
+##### 7. Lambda Throttling Alarm
 
 Alert when Lambda is being throttled:
 
 ```bash
 aws cloudwatch put-metric-alarm \
-  --alarm-name zapier-api-throttling \
-  --alarm-description "Alert when API is being throttled" \
+  --alarm-name zapier-api-lambda-throttling \
+  --alarm-description "Alert when Lambda is being throttled" \
   --metric-name Throttles \
   --namespace AWS/Lambda \
   --statistic Sum \
@@ -206,7 +419,90 @@ aws cloudwatch put-metric-alarm \
   --comparison-operator GreaterThanThreshold \
   --evaluation-periods 1 \
   --dimensions Name=FunctionName,Value=amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL \
+  --treat-missing-data notBreaching \
   --region us-east-2
+```
+
+#### Quick Setup: Create All Alarms
+
+Create a script to set up all alarms at once:
+
+```bash
+#!/bin/bash
+# setup-alarms.sh - Create all CloudWatch alarms for Zapier Triggers API
+
+REGION="us-east-2"
+LAMBDA_FUNCTION="amplify-dmmfqlsr845yz-mai-TriggersApiFunction53F37-11nL053fQfsL"
+
+echo "Creating CloudWatch alarms..."
+
+# 1. High Ingestion Latency
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-high-ingestion-latency \
+  --alarm-description "Alert when ingestion latency exceeds 1 second" \
+  --metric-name ApiLatency \
+  --namespace ZapierTriggersAPI \
+  --statistic Average \
+  --period 300 \
+  --threshold 1000 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2 \
+  --dimensions Name=Endpoint,Value=/events Name=Method,Value=POST \
+  --treat-missing-data notBreaching \
+  --region $REGION
+
+# 3. High 5xx Errors
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-5xx-errors \
+  --alarm-description "Alert on any 5xx server errors" \
+  --metric-name Api5xxErrors \
+  --namespace ZapierTriggersAPI \
+  --statistic Sum \
+  --period 60 \
+  --threshold 1 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --evaluation-periods 1 \
+  --treat-missing-data notBreaching \
+  --region $REGION
+
+# 5. Lambda High Error Rate
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-lambda-high-error-rate \
+  --alarm-description "Alert when Lambda error rate is high" \
+  --metric-name Errors \
+  --namespace AWS/Lambda \
+  --statistic Sum \
+  --period 300 \
+  --threshold 10 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2 \
+  --dimensions Name=FunctionName,Value=$LAMBDA_FUNCTION \
+  --treat-missing-data notBreaching \
+  --region $REGION
+
+# 7. Lambda Throttling
+aws cloudwatch put-metric-alarm \
+  --alarm-name zapier-api-lambda-throttling \
+  --alarm-description "Alert when Lambda is being throttled" \
+  --metric-name Throttles \
+  --namespace AWS/Lambda \
+  --statistic Sum \
+  --period 60 \
+  --threshold 1 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --dimensions Name=FunctionName,Value=$LAMBDA_FUNCTION \
+  --treat-missing-data notBreaching \
+  --region $REGION
+
+echo "✓ All alarms created successfully!"
+echo "Note: Configure SNS notifications separately using the instructions below."
+```
+
+Save this as `scripts/setup-alarms.sh` and run:
+```bash
+chmod +x scripts/setup-alarms.sh
+./scripts/setup-alarms.sh
 ```
 
 ### Alarm Actions

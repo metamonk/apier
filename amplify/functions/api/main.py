@@ -3,7 +3,7 @@ Zapier Triggers API - FastAPI Backend
 Endpoints: POST /events, GET /inbox, POST /inbox/{id}/ack
 Includes JWT Bearer token authentication for API security.
 """
-from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi import FastAPI, HTTPException, status, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -13,9 +13,16 @@ from decimal import Decimal
 import os
 import uuid
 import json
+import time
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+
+# AWS X-Ray instrumentation
+from aws_xray_sdk.core import xray_recorder, patch_all
+
+# Patch all AWS SDK calls for automatic tracing
+patch_all()
 
 # Import authentication utilities
 import auth
@@ -34,6 +41,10 @@ table = dynamodb.Table(table_name)
 # Initialize Secrets Manager client
 secrets_client = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
 secret_arn = os.environ.get('SECRET_ARN')
+
+# Initialize CloudWatch client for custom metrics
+cloudwatch_client = boto3.client('cloudwatch', region_name=os.environ.get('AWS_REGION', 'us-east-2'))
+CLOUDWATCH_NAMESPACE = 'ZapierTriggersAPI'
 
 # Global cache for secrets (Lambda container reuse optimization)
 _secrets_cache: Dict[str, Any] = {}
@@ -97,11 +108,233 @@ def get_secret(secret_id: str) -> Dict[str, Any]:
             detail=f"Unexpected error retrieving secret: {str(e)}"
         )
 
+# OpenAPI Tags Metadata
+tags_metadata = [
+    {
+        "name": "Authentication",
+        "description": "OAuth2 authentication endpoints for obtaining JWT bearer tokens. "
+                      "Use the `/token` endpoint to authenticate with your API key and receive a token for accessing protected endpoints.",
+    },
+    {
+        "name": "Events",
+        "description": "Event ingestion endpoints for receiving and storing events from external sources. "
+                      "All event endpoints require JWT authentication.",
+    },
+    {
+        "name": "Inbox",
+        "description": "Event delivery endpoints for retrieving pending events and acknowledging successful delivery. "
+                      "These endpoints enable the polling pattern for Zapier integrations.",
+    },
+    {
+        "name": "Health",
+        "description": "Service health check and status endpoints. These are publicly accessible without authentication.",
+    },
+    {
+        "name": "Configuration",
+        "description": "Configuration endpoints for retrieving non-sensitive system configuration. "
+                      "Demonstrates secure secret retrieval from AWS Secrets Manager.",
+    },
+]
+
 app = FastAPI(
     title="Zapier Triggers API",
-    description="Event ingestion and delivery API for Zapier automation",
-    version="1.0.0"
+    summary="Event ingestion and delivery API for Zapier automation workflows",
+    description="""
+## Overview
+
+The **Zapier Triggers API** provides a robust event ingestion and delivery system designed for Zapier automation workflows.
+This API enables external systems to send events that can be consumed by Zapier triggers using a polling pattern.
+
+## Key Features
+
+* **Event Ingestion**: POST events from any source with automatic storage and TTL management
+* **Event Delivery**: Retrieve pending events via polling with acknowledgment support
+* **JWT Authentication**: Secure OAuth2-based authentication using JWT bearer tokens
+* **AWS Integration**: Leverages DynamoDB for storage and Secrets Manager for credential management
+* **GDPR/CCPA Compliant**: Automatic data retention policies with 90-day TTL
+* **Observability**: AWS X-Ray tracing and CloudWatch metrics for monitoring
+
+## Authentication Flow
+
+1. **Obtain Token**: POST credentials to `/token` endpoint (username: "api", password: your API key)
+2. **Receive JWT**: Get a JWT bearer token valid for 24 hours
+3. **Access Protected Endpoints**: Include token in Authorization header: `Bearer {token}`
+
+## Typical Workflow
+
+1. External system POSTs event data to `/events`
+2. Event is stored with "pending" status in DynamoDB
+3. Zapier polls `/inbox` to retrieve undelivered events
+4. After successful processing, Zapier POSTs to `/inbox/{id}/ack`
+5. Event status updates to "delivered"
+
+## Data Retention
+
+All events automatically expire after 90 days (TTL) for GDPR/CCPA compliance.
+    """,
+    version="1.0.0",
+    terms_of_service="https://example.com/terms/",
+    contact={
+        "name": "API Support",
+        "url": "https://example.com/support",
+        "email": "support@example.com"
+    },
+    license_info={
+        "name": "MIT",
+        "identifier": "MIT",
+    },
+    openapi_tags=tags_metadata,
 )
+
+# CloudWatch Metrics Middleware
+@app.middleware("http")
+async def cloudwatch_metrics_middleware(request: Request, call_next):
+    """
+    Middleware to track API performance metrics and publish to CloudWatch.
+    Tracks: ingestion latency, error rates, and request counts.
+    """
+    start_time = time.perf_counter()
+    endpoint = request.url.path
+    method = request.method
+
+    # Process the request
+    response = None
+    error_occurred = False
+    status_code = 500  # Default to error if something goes wrong
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+
+        # Check if this is an error response
+        if status_code >= 400:
+            error_occurred = True
+
+    except Exception as e:
+        error_occurred = True
+        # Re-raise the exception after recording metrics
+        raise
+    finally:
+        # Calculate request duration
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        # Add processing time header
+        if response:
+            response.headers["X-Process-Time"] = f"{duration_ms:.2f}ms"
+
+        # Publish metrics to CloudWatch asynchronously (fire and forget)
+        # We don't await this to avoid slowing down the response
+        try:
+            publish_request_metrics(
+                endpoint=endpoint,
+                method=method,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                error_occurred=error_occurred
+            )
+        except Exception as metric_error:
+            # Log error but don't fail the request
+            print(f"Failed to publish CloudWatch metrics: {str(metric_error)}")
+
+    return response
+
+
+def publish_request_metrics(endpoint: str, method: str, status_code: int, duration_ms: float, error_occurred: bool):
+    """
+    Publish custom metrics to CloudWatch.
+
+    Metrics published:
+    - ApiLatency: Request duration in milliseconds
+    - ApiRequests: Request count
+    - ApiErrors: Error count (4xx and 5xx)
+    - Api4xxErrors: Client error count
+    - Api5xxErrors: Server error count
+    """
+    try:
+        metric_data = []
+        timestamp = datetime.utcnow()
+
+        # Common dimensions for all metrics
+        dimensions = [
+            {'Name': 'Endpoint', 'Value': endpoint},
+            {'Name': 'Method', 'Value': method},
+            {'Name': 'StatusCode', 'Value': str(status_code)}
+        ]
+
+        # 1. API Latency Metric (for POST /events - ingestion latency)
+        metric_data.append({
+            'MetricName': 'ApiLatency',
+            'Dimensions': dimensions,
+            'Value': duration_ms,
+            'Unit': 'Milliseconds',
+            'Timestamp': timestamp,
+            'StorageResolution': 60  # Standard resolution (60 seconds)
+        })
+
+        # 2. API Request Count
+        metric_data.append({
+            'MetricName': 'ApiRequests',
+            'Dimensions': dimensions,
+            'Value': 1,
+            'Unit': 'Count',
+            'Timestamp': timestamp,
+            'StorageResolution': 60
+        })
+
+        # 3. Error Metrics
+        if error_occurred:
+            # Total errors
+            metric_data.append({
+                'MetricName': 'ApiErrors',
+                'Dimensions': dimensions,
+                'Value': 1,
+                'Unit': 'Count',
+                'Timestamp': timestamp,
+                'StorageResolution': 60
+            })
+
+            # 4xx errors (client errors)
+            if 400 <= status_code < 500:
+                metric_data.append({
+                    'MetricName': 'Api4xxErrors',
+                    'Dimensions': dimensions,
+                    'Value': 1,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'StorageResolution': 60
+                })
+
+            # 5xx errors (server errors)
+            elif status_code >= 500:
+                metric_data.append({
+                    'MetricName': 'Api5xxErrors',
+                    'Dimensions': dimensions,
+                    'Value': 1,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'StorageResolution': 60
+                })
+
+        # 4. API Availability (success rate)
+        metric_data.append({
+            'MetricName': 'ApiAvailability',
+            'Dimensions': [{'Name': 'Endpoint', 'Value': endpoint}],
+            'Value': 1 if not error_occurred else 0,
+            'Unit': 'Count',
+            'Timestamp': timestamp,
+            'StorageResolution': 60
+        })
+
+        # Publish all metrics in a single API call
+        cloudwatch_client.put_metric_data(
+            Namespace=CLOUDWATCH_NAMESPACE,
+            MetricData=metric_data
+        )
+
+    except Exception as e:
+        # Log but don't fail - metrics are best effort
+        print(f"Error publishing metrics to CloudWatch: {str(e)}")
+
 
 # CORS configuration
 app.add_middleware(
@@ -178,16 +411,35 @@ async def get_authenticated_user(
 
 
 # Authentication endpoint
-@app.post("/token", response_model=Token)
+@app.post("/token", response_model=Token, tags=["Authentication"],
+          summary="Obtain JWT Access Token",
+          response_description="JWT bearer token for API authentication")
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     jwt_secret: str = Depends(get_jwt_secret)
 ):
     """
-    OAuth2 compatible token endpoint.
-    Authenticate with API key and receive a JWT bearer token.
+    ## OAuth2 Token Endpoint
 
-    The username should be "api" and the password should be the Zapier API key.
+    Authenticate with your API credentials and receive a JWT bearer token for accessing protected endpoints.
+
+    ### Credentials
+
+    - **username**: Must be "api"
+    - **password**: Your Zapier API key
+
+    ### Response
+
+    Returns a JWT access token valid for 24 hours that must be included in the Authorization header
+    for all protected endpoint requests.
+
+    ### Example Usage
+
+    ```bash
+    curl -X POST "https://your-api.com/token" \\
+         -H "Content-Type: application/x-www-form-urlencoded" \\
+         -d "username=api&password=your-api-key-here"
+    ```
     """
     # Get stored API key from secrets
     secrets = get_secret(secret_arn)
@@ -218,25 +470,52 @@ async def login_for_access_token(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-# Health check endpoint (public - no authentication required)
-@app.get("/")
+# Health check endpoints (public - no authentication required)
+@app.get("/", tags=["Health"],
+         summary="Root Endpoint",
+         response_description="API service information and status")
 def read_root():
+    """
+    ## Root API Endpoint
+
+    Returns basic information about the API service including name, status, and version.
+    This endpoint is publicly accessible and does not require authentication.
+    """
     return {
         "service": "Zapier Triggers API",
         "status": "healthy",
         "version": "1.0.0"
     }
 
-@app.get("/health")
+@app.get("/health", tags=["Health"],
+         summary="Health Check",
+         response_description="Service health status")
 def health_check():
+    """
+    ## Health Check Endpoint
+
+    Simple health check endpoint that returns the service status.
+    Used by load balancers and monitoring systems to verify service availability.
+    This endpoint is publicly accessible and does not require authentication.
+    """
     return {"status": "healthy"}
 
 # GET /config - Retrieve non-sensitive configuration (demonstrates secret access)
-@app.get("/config")
+@app.get("/config", tags=["Configuration"],
+         summary="Get Configuration Status",
+         response_description="Non-sensitive configuration information")
 async def get_config():
     """
-    Retrieve non-sensitive configuration values from Secrets Manager.
-    This demonstrates secure secret retrieval at runtime.
+    ## Configuration Status Endpoint
+
+    Retrieves non-sensitive configuration information from AWS Secrets Manager.
+    This endpoint demonstrates secure secret retrieval at runtime without exposing sensitive values.
+
+    ### Response
+
+    Returns boolean flags indicating which secrets are configured and whether the secret cache was hit.
+
+    **Note**: This endpoint does NOT expose actual API keys or secret values for security reasons.
     """
     if not secret_arn:
         raise HTTPException(
@@ -265,16 +544,52 @@ async def get_config():
         )
 
 # POST /events - Ingest new event (protected endpoint)
-@app.post("/events", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/events", response_model=EventResponse, status_code=status.HTTP_201_CREATED,
+          tags=["Events"],
+          summary="Create New Event",
+          response_description="Event created successfully with ID and timestamp")
 async def create_event(
     event: Event,
     current_user: User = Depends(get_authenticated_user)
 ):
     """
-    Ingest a new event into the system.
-    Returns event ID, status, and timestamp.
+    ## Create Event Endpoint
 
-    Requires authentication via JWT bearer token.
+    Ingests a new event into the system for processing by Zapier workflows.
+
+    ### Authentication
+
+    Requires JWT bearer token in Authorization header.
+
+    ### Request Body
+
+    - **type**: Event type identifier (e.g., "user.created", "order.placed")
+    - **source**: Event source system (e.g., "shopify", "salesforce")
+    - **payload**: Event data as JSON object
+
+    ### Response
+
+    Returns the created event with:
+    - **id**: Unique event identifier (UUID)
+    - **status**: Always "pending" for new events
+    - **timestamp**: ISO 8601 timestamp of event creation
+
+    ### Data Retention
+
+    Events automatically expire after 90 days (GDPR/CCPA compliance).
+
+    ### Example
+
+    ```json
+    {
+      "type": "user.created",
+      "source": "web-app",
+      "payload": {
+        "user_id": "12345",
+        "email": "user@example.com"
+      }
+    }
+    ```
     """
     # Generate unique event ID
     event_id = str(uuid.uuid4())
@@ -310,12 +625,39 @@ async def create_event(
     )
 
 # GET /inbox - Retrieve undelivered events (protected endpoint)
-@app.get("/inbox", response_model=List[InboxEvent])
+@app.get("/inbox", response_model=List[InboxEvent],
+         tags=["Inbox"],
+         summary="Get Pending Events",
+         response_description="List of pending events awaiting delivery")
 async def get_inbox(current_user: User = Depends(get_authenticated_user)):
     """
-    Retrieve all undelivered events from the inbox.
+    ## Get Inbox Events
 
-    Requires authentication via JWT bearer token.
+    Retrieves all undelivered (pending) events from the inbox for Zapier polling.
+
+    ### Authentication
+
+    Requires JWT bearer token in Authorization header.
+
+    ### Response
+
+    Returns an array of pending events (max 100), sorted by creation time (newest first).
+    Each event includes:
+    - **id**: Unique event identifier
+    - **type**: Event type
+    - **source**: Event source system
+    - **payload**: Event data
+    - **status**: Event status (will be "pending")
+    - **created_at**: Event creation timestamp
+    - **updated_at**: Last update timestamp
+
+    ### Polling Pattern
+
+    This endpoint is designed for Zapier's polling trigger pattern:
+    1. Zapier polls this endpoint periodically
+    2. Retrieves pending events
+    3. Processes events in Zapier workflows
+    4. Acknowledges each event via `/inbox/{id}/ack`
     """
     try:
         # Query GSI for pending events
@@ -346,16 +688,45 @@ async def get_inbox(current_user: User = Depends(get_authenticated_user)):
         )
 
 # POST /inbox/{event_id}/ack - Acknowledge event delivery (protected endpoint)
-@app.post("/inbox/{event_id}/ack")
+@app.post("/inbox/{event_id}/ack",
+          tags=["Inbox"],
+          summary="Acknowledge Event Delivery",
+          response_description="Event acknowledged and marked as delivered")
 async def acknowledge_event(
     event_id: str,
     current_user: User = Depends(get_authenticated_user)
 ):
     """
-    Acknowledge successful delivery of an event.
-    Updates event status to 'delivered'.
+    ## Acknowledge Event
 
-    Requires authentication via JWT bearer token.
+    Marks an event as successfully delivered after Zapier has processed it.
+
+    ### Authentication
+
+    Requires JWT bearer token in Authorization header.
+
+    ### Path Parameters
+
+    - **event_id**: The unique identifier (UUID) of the event to acknowledge
+
+    ### Response
+
+    Returns confirmation with:
+    - **id**: The acknowledged event ID
+    - **status**: New status ("delivered")
+    - **message**: Confirmation message
+    - **updated_at**: Timestamp of acknowledgment
+
+    ### Workflow
+
+    After Zapier successfully processes an event from `/inbox`:
+    1. Call this endpoint with the event ID
+    2. Event status updates from "pending" to "delivered"
+    3. Event will no longer appear in future `/inbox` requests
+
+    ### Error Handling
+
+    Returns 404 if event ID is not found.
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
 
