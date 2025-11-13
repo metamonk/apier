@@ -336,14 +336,15 @@ def publish_request_metrics(endpoint: str, method: str, status_code: int, durati
         print(f"Error publishing metrics to CloudWatch: {str(e)}")
 
 
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=False,  # Must be False when using wildcard origins
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS configuration handled by Lambda Function URL
+# Commenting out FastAPI CORS middleware to avoid duplicate headers
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=False,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # Request/Response Models
 class Event(BaseModel):
