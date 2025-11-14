@@ -255,8 +255,8 @@ function EventForm({ onEventCreated, onError }: EventFormProps) {
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 space-y-6">
-        {/* Event Type Selection */}
-        <div className="grid gap-6 md:grid-cols-2">
+        {/* Event Type Configuration */}
+        <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="event-select">Event Type</Label>
             <Select value={eventType} onValueChange={handleEventTypeChange}>
@@ -271,6 +271,9 @@ function EventForm({ onEventCreated, onError }: EventFormProps) {
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Choose a preset event type or select "Custom Event" to define your own
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -285,36 +288,55 @@ function EventForm({ onEventCreated, onError }: EventFormProps) {
               onChange={(e) => setCustomEventType(e.target.value)}
               className="font-mono text-sm"
             />
+            <p className="text-xs text-muted-foreground">
+              Override the preset event type with your own custom event name
+            </p>
+          </div>
+
+          {/* AI Generate Button */}
+          <div className="pt-2">
+            <Button
+              type="button"
+              variant="default"
+              onClick={handleGenerateEvent}
+              disabled={isGenerating}
+              className="w-full gap-2"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-4 w-4" />
+                  Generate Event with AI
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              Let AI create a realistic event with varied structure and data
+            </p>
           </div>
         </div>
 
-        {/* AI Generate Button */}
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleGenerateEvent}
-            disabled={isGenerating}
-            className="gap-2"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Wand2 className="h-4 w-4" />
-                Generate Event with AI
-              </>
-            )}
-          </Button>
+        {/* Divider */}
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border"></div>
+          </div>
+          <div className="relative flex justify-center text-xs">
+            <span className="bg-card px-2 text-muted-foreground">Payload Editor</span>
+          </div>
         </div>
 
         {/* JSON Payload Editor */}
         <div className="space-y-2">
-          <Label htmlFor="payload-editor">Event Payload</Label>
+          <Label htmlFor="payload-editor">Event Payload (JSON)</Label>
           <JsonEditor value={payload} onChange={setPayload} />
+          <p className="text-xs text-muted-foreground">
+            Customize the event payload or use the generated/preset payload as-is
+          </p>
         </div>
 
         {/* Status Messages */}
