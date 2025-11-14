@@ -808,10 +808,9 @@ async def create_event(
         "updated_at": timestamp,
         "ttl": ttl_timestamp,  # GDPR/CCPA: Auto-delete after 90 days
         # Delivery tracking fields (Task 22.1)
-        "delivery_attempts": 0,
-        "last_delivery_attempt": None,
-        "delivery_latency_ms": None,
-        "error_message": None
+        # Note: last_delivery_attempt is omitted for pending events (sparse GSI)
+        # It will be added when the event is first delivered/attempted
+        "delivery_attempts": 0
     }
 
     try:

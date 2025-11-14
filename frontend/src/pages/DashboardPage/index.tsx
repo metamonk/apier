@@ -168,7 +168,7 @@ export default function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Button
             variant="outline"
-            className="h-auto p-6 justify-start gap-4 hover:bg-accent"
+            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors"
             onClick={() => navigate('/events')}
           >
             <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-primary/10">
@@ -183,7 +183,7 @@ export default function DashboardPage() {
           </Button>
           <Button
             variant="outline"
-            className="h-auto p-6 justify-start gap-4 hover:bg-accent"
+            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors"
             onClick={() => navigate('/webhooks')}
           >
             <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-primary/10">
