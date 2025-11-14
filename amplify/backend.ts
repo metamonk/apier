@@ -10,6 +10,9 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cdk from 'aws-cdk-lib';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import { RemovalPolicy } from 'aws-cdk-lib';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -45,6 +48,8 @@ const eventsTable = new dynamodb.Table(stack, 'EventsTable', {
   pointInTimeRecovery: true,
   // GDPR/CCPA Compliance: Automatic data deletion after 90 days
   timeToLiveAttribute: 'ttl',
+  // Enable DynamoDB Streams for real-time updates (Task 27.3)
+  stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
 });
 
 // Add GSI for status queries
@@ -476,3 +481,237 @@ new cdk.CfnOutput(stack, 'DispatcherScheduleRuleName', {
   value: dispatcherRule.ruleName,
   description: 'Name of the EventBridge rule that triggers the dispatcher',
 });
+
+// ========================================
+// WEBSOCKET REAL-TIME UPDATES (TASK 27)
+// ========================================
+
+// Create DynamoDB table for WebSocket connections (Task 27.2)
+const connectionsTable = new dynamodb.Table(stack, 'ConnectionsTable', {
+  tableName: `zapier-websocket-connections-${stack.stackName}`,
+  partitionKey: {
+    name: 'connectionId',
+    type: dynamodb.AttributeType.STRING,
+  },
+  billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+  removalPolicy: RemovalPolicy.DESTROY, // Clean up on stack deletion
+  // Auto-expire stale connections after 24 hours
+  timeToLiveAttribute: 'ttl',
+});
+
+// Create Lambda function for WebSocket $connect route (Task 27.2)
+const wsConnectFunction = new lambda.Function(stack, 'WebSocketConnectFunction', {
+  runtime: lambda.Runtime.PYTHON_3_12,
+  handler: 'main.handler',
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/websocket-connect')),
+  architecture: lambda.Architecture.X86_64,
+  memorySize: 256,
+  timeout: cdk.Duration.seconds(10),
+  tracing: lambda.Tracing.ACTIVE,
+  environment: {
+    CONNECTIONS_TABLE_NAME: connectionsTable.tableName,
+  },
+});
+
+// Grant permissions to write to connections table
+connectionsTable.grantWriteData(wsConnectFunction);
+
+// Create Lambda function for WebSocket $disconnect route (Task 27.2)
+const wsDisconnectFunction = new lambda.Function(stack, 'WebSocketDisconnectFunction', {
+  runtime: lambda.Runtime.PYTHON_3_12,
+  handler: 'main.handler',
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/websocket-disconnect')),
+  architecture: lambda.Architecture.X86_64,
+  memorySize: 256,
+  timeout: cdk.Duration.seconds(10),
+  tracing: lambda.Tracing.ACTIVE,
+  environment: {
+    CONNECTIONS_TABLE_NAME: connectionsTable.tableName,
+  },
+});
+
+// Grant permissions to delete from connections table
+connectionsTable.grantWriteData(wsDisconnectFunction);
+
+// Create Lambda function for WebSocket broadcaster (Task 27.4)
+const wsBroadcasterFunction = new lambda.Function(stack, 'WebSocketBroadcasterFunction', {
+  runtime: lambda.Runtime.PYTHON_3_12,
+  handler: 'main.handler',
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/websocket-broadcaster')),
+  architecture: lambda.Architecture.X86_64,
+  memorySize: 512,
+  timeout: cdk.Duration.seconds(60),
+  tracing: lambda.Tracing.ACTIVE,
+  environment: {
+    CONNECTIONS_TABLE_NAME: connectionsTable.tableName,
+    // WEBSOCKET_API_ENDPOINT will be set after WebSocket API is created
+  },
+});
+
+// Grant permissions to read connections and read/write events
+connectionsTable.grantReadData(wsBroadcasterFunction);
+connectionsTable.grantWriteData(wsBroadcasterFunction); // For cleaning up stale connections
+
+// Create WebSocket API (Task 27.1)
+const webSocketApi = new apigatewayv2.WebSocketApi(stack, 'WebSocketApi', {
+  apiName: `zapier-triggers-websocket-${stack.stackName}`,
+  description: 'WebSocket API for real-time event updates',
+  // Route selection based on action field in message body
+  routeSelectionExpression: '$request.body.action',
+});
+
+// Create WebSocket stage with auto-deployment (Task 27.1)
+const webSocketStage = new apigatewayv2.WebSocketStage(stack, 'WebSocketStage', {
+  webSocketApi: webSocketApi,
+  stageName: 'production',
+  autoDeploy: true,
+});
+
+// Add $connect route (Task 27.1)
+webSocketApi.addRoute('$connect', {
+  integration: new apigatewayv2_integrations.WebSocketLambdaIntegration(
+    'ConnectIntegration',
+    wsConnectFunction
+  ),
+});
+
+// Add $disconnect route (Task 27.1)
+webSocketApi.addRoute('$disconnect', {
+  integration: new apigatewayv2_integrations.WebSocketLambdaIntegration(
+    'DisconnectIntegration',
+    wsDisconnectFunction
+  ),
+});
+
+// Add $default route for unmatched messages (Task 27.1)
+webSocketApi.addRoute('$default', {
+  integration: new apigatewayv2_integrations.WebSocketLambdaIntegration(
+    'DefaultIntegration',
+    wsConnectFunction // Reuse connect function for simple acknowledgment
+  ),
+});
+
+// Grant broadcaster permission to post messages to WebSocket API (Task 27.4)
+wsBroadcasterFunction.addToRolePolicy(new iam.PolicyStatement({
+  effect: iam.Effect.ALLOW,
+  actions: ['execute-api:ManageConnections'],
+  resources: [
+    `arn:aws:execute-api:${stack.region}:${stack.account}:${webSocketApi.apiId}/${webSocketStage.stageName}/*`,
+  ],
+}));
+
+// Update broadcaster environment with WebSocket API endpoint (Task 27.4)
+wsBroadcasterFunction.addEnvironment(
+  'WEBSOCKET_API_ENDPOINT',
+  `${webSocketApi.apiEndpoint}/${webSocketStage.stageName}`
+);
+
+// Add DynamoDB Stream event source to broadcaster (Task 27.3)
+wsBroadcasterFunction.addEventSource(new lambdaEventSources.DynamoEventSource(eventsTable, {
+  startingPosition: lambda.StartingPosition.LATEST,
+  batchSize: 10,
+  maxBatchingWindow: cdk.Duration.seconds(1),
+  retryAttempts: 3,
+  bisectBatchOnError: true,
+  // Only trigger on INSERT and MODIFY events
+  filters: [
+    lambda.FilterCriteria.filter({
+      eventName: lambda.FilterRule.isEqual('INSERT'),
+    }),
+    lambda.FilterCriteria.filter({
+      eventName: lambda.FilterRule.isEqual('MODIFY'),
+    }),
+  ],
+}));
+
+// Output WebSocket API URL (Task 27.1)
+new cdk.CfnOutput(stack, 'WebSocketApiUrl', {
+  value: webSocketStage.url,
+  description: 'WebSocket API endpoint URL (wss://...)',
+});
+
+new cdk.CfnOutput(stack, 'WebSocketApiId', {
+  value: webSocketApi.apiId,
+  description: 'WebSocket API ID',
+});
+
+// Create CloudWatch alarms for WebSocket operations
+const wsConnectErrorAlarm = new cloudwatch.Alarm(stack, 'WebSocketConnectErrorAlarm', {
+  alarmName: `zapier-websocket-connect-errors-${stack.stackName}`,
+  alarmDescription: 'Alert when WebSocket connect Lambda encounters errors',
+  metric: wsConnectFunction.metricErrors({
+    period: cdk.Duration.minutes(5),
+    statistic: 'Sum',
+  }),
+  threshold: 5,
+  evaluationPeriods: 1,
+  comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+  treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+});
+
+wsConnectErrorAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(alertsTopic));
+
+const wsBroadcasterErrorAlarm = new cloudwatch.Alarm(stack, 'WebSocketBroadcasterErrorAlarm', {
+  alarmName: `zapier-websocket-broadcaster-errors-${stack.stackName}`,
+  alarmDescription: 'Alert when WebSocket broadcaster Lambda encounters errors',
+  metric: wsBroadcasterFunction.metricErrors({
+    period: cdk.Duration.minutes(5),
+    statistic: 'Sum',
+  }),
+  threshold: 10,
+  evaluationPeriods: 2,
+  comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+  treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+});
+
+wsBroadcasterErrorAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(alertsTopic));
+
+// Add WebSocket metrics to dashboard
+dashboard.addWidgets(
+  new cloudwatch.GraphWidget({
+    title: 'WebSocket - Connections',
+    left: [
+      wsConnectFunction.metricInvocations({
+        label: 'Connections',
+        color: cloudwatch.Color.BLUE,
+        statistic: 'Sum',
+      }),
+      wsDisconnectFunction.metricInvocations({
+        label: 'Disconnections',
+        color: cloudwatch.Color.ORANGE,
+        statistic: 'Sum',
+      }),
+    ],
+    right: [
+      wsConnectFunction.metricErrors({
+        label: 'Connect Errors',
+        color: cloudwatch.Color.RED,
+        statistic: 'Sum',
+      }),
+    ],
+    width: 12,
+  }),
+  new cloudwatch.GraphWidget({
+    title: 'WebSocket - Broadcasting',
+    left: [
+      wsBroadcasterFunction.metricInvocations({
+        label: 'Broadcast Invocations',
+        color: cloudwatch.Color.GREEN,
+        statistic: 'Sum',
+      }),
+      wsBroadcasterFunction.metricErrors({
+        label: 'Broadcast Errors',
+        color: cloudwatch.Color.RED,
+        statistic: 'Sum',
+      }),
+    ],
+    right: [
+      wsBroadcasterFunction.metricDuration({
+        label: 'Broadcast Duration (ms)',
+        color: cloudwatch.Color.PURPLE,
+        statistic: 'Average',
+      }),
+    ],
+    width: 12,
+  })
+);
