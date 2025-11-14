@@ -114,6 +114,14 @@ export function useWebSocket(config: UseWebSocketConfig = {}) {
     onMetricsUpdate,
   } = config
 
+  // Debug: Log WebSocket configuration
+  console.log('[WebSocket] Configuration:', {
+    url,
+    urlFromEnv: import.meta.env.VITE_WEBSOCKET_URL,
+    enabled,
+    hasToken: !!token,
+  })
+
   const [state, setState] = useState<WebSocketState>(WebSocketState.DISCONNECTED)
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
   const [reconnectDelay, setReconnectDelay] = useState(initialReconnectDelay)
