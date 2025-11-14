@@ -240,28 +240,6 @@ export default function DashboardPage() {
           />
         )}
       </section>
-
-      {/* Dashboard Complete! */}
-      <div className="space-y-6">
-        <div className="p-8 rounded-lg border border-dashed border-border bg-green-50 dark:bg-green-950">
-          <h2 className="text-xl font-semibold mb-4 text-green-900 dark:text-green-100">
-            Dashboard Complete! 🎉
-          </h2>
-          <div className="space-y-2 text-sm text-green-800 dark:text-green-200">
-            <p>✅ Event Count Cards (Task 20.3) - Complete!</p>
-            <p>✅ Lifecycle Flow Visualization (Task 20.4) - Complete!</p>
-            <p>✅ Auto-refresh Logic (Task 20.6) - Complete!</p>
-            <p>✅ Latency & Throughput Charts (Task 20.5) - Complete!</p>
-            <p>✅ Send Event Sheet (Task 20.7) - Complete!</p>
-          </div>
-          <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
-            <p className="text-sm text-green-700 dark:text-green-300">
-              All dashboard components are now live and operational. Use the "Send Event" button
-              above to test real-time event submission and dashboard updates.
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
