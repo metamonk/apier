@@ -45,7 +45,7 @@ export default function WebhooksPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   // Filter states
-  const [eventTypeFilter, setEventTypeFilter] = useState<string>('')
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
@@ -63,7 +63,7 @@ export default function WebhooksPage() {
 
       // Build query params
       const params = new URLSearchParams()
-      if (eventTypeFilter) params.append('event_type', eventTypeFilter)
+      if (eventTypeFilter && eventTypeFilter !== 'all') params.append('event_type', eventTypeFilter)
       if (searchQuery) params.append('search', searchQuery)
       if (startDate) params.append('start_date', new Date(startDate).toISOString())
       if (endDate) params.append('end_date', new Date(endDate).toISOString())
@@ -112,7 +112,7 @@ export default function WebhooksPage() {
 
   // Clear filters
   const handleClearFilters = () => {
-    setEventTypeFilter('')
+    setEventTypeFilter('all')
     setSearchQuery('')
     setStartDate('')
     setEndDate('')
@@ -215,7 +215,7 @@ export default function WebhooksPage() {
                   <SelectValue placeholder="All event types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All event types</SelectItem>
+                  <SelectItem value="all">All event types</SelectItem>
                   {uniqueEventTypes.map((type) => (
                     <SelectItem key={type} value={type}>
                       {type}
@@ -263,7 +263,7 @@ export default function WebhooksPage() {
           </div>
 
           {/* Clear Filters Button */}
-          {(eventTypeFilter || searchQuery || startDate || endDate) && (
+          {((eventTypeFilter && eventTypeFilter !== 'all') || searchQuery || startDate || endDate) && (
             <div className="mt-4 flex justify-end">
               <Button
                 variant="ghost"
