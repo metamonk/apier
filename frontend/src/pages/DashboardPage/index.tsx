@@ -22,6 +22,8 @@ import { ThemeToggle } from '../../components/ui/theme-toggle'
 import { useAuth } from '../../lib/useAuth'
 import { fetchSummary, fetchLatency, fetchThroughput } from '../../lib/metrics-client'
 import type { EventSummary, LatencyMetrics, ThroughputMetrics } from '../../lib/metrics-types'
+import { useWebSocket } from '../../lib/useWebSocket'
+import { ConnectionStatus } from '../../components/ConnectionStatus'
 
 const REFRESH_INTERVAL = 10000 // 10 seconds
 
@@ -62,15 +64,35 @@ export default function DashboardPage() {
     }
   }, [token])
 
-  // Auto-refresh effect
+  // WebSocket connection for real-time updates
+  const ws = useWebSocket({
+    enabled: !!token && !isPaused,
+    onMetricsUpdate: (data) => {
+      // Real-time metrics update from WebSocket
+      if (data.summary) setSummary(data.summary)
+      if (data.latency) setLatency(data.latency)
+      if (data.throughput) setThroughput(data.throughput)
+      setLastUpdated(new Date())
+    },
+    onEventUpdate: () => {
+      // Event was updated, refresh metrics
+      loadMetrics()
+    },
+    onEventCreated: () => {
+      // New event created, refresh metrics
+      loadMetrics()
+    },
+  })
+
+  // Auto-refresh effect - only poll when WebSocket is not connected
   useEffect(() => {
-    if (!token || isPaused) return
+    if (!token || isPaused || ws.isConnected) return
 
     loadMetrics()
 
     const interval = setInterval(loadMetrics, REFRESH_INTERVAL)
     return () => clearInterval(interval)
-  }, [token, isPaused, loadMetrics])
+  }, [token, isPaused, ws.isConnected, loadMetrics])
 
   // Manual refresh handler
   const handleManualRefresh = () => {
@@ -121,6 +143,11 @@ export default function DashboardPage() {
                 Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
+            <ConnectionStatus
+              connectionState={ws.connectionState}
+              onRetry={ws.reconnect}
+              error={ws.error}
+            />
             <ThemeToggle />
             <SendEventSheet onEventSent={loadMetrics} />
             <Button
@@ -159,7 +186,9 @@ export default function DashboardPage() {
           </p>
           {!isPaused && (
             <p className="text-xs text-muted-foreground">
-              Auto-refresh: {REFRESH_INTERVAL / 1000}s
+              {ws.isConnected
+                ? 'Real-time updates active'
+                : `Polling: ${REFRESH_INTERVAL / 1000}s`}
             </p>
           )}
         </div>

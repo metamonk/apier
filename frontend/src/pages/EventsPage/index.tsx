@@ -22,6 +22,8 @@ import { Badge } from '../../components/ui/badge'
 import { Database, RefreshCw, Pause, Play, ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { Event, EventFilters as EventFiltersType } from '../../lib/event-types'
+import { useWebSocket } from '../../lib/useWebSocket'
+import { ConnectionStatus } from '../../components/ConnectionStatus'
 
 const REFRESH_INTERVAL = 15000 // 15 seconds
 
@@ -56,15 +58,37 @@ export default function EventsPage() {
     }
   }, [token])
 
-  // Auto-refresh effect
+  // WebSocket connection for real-time event updates
+  const ws = useWebSocket({
+    enabled: !!token && !isPaused,
+    onEventCreated: (event) => {
+      // Add new event to the list
+      setEvents((prev) => [event, ...prev])
+      setLastUpdated(new Date())
+    },
+    onEventUpdate: (event) => {
+      // Update existing event in the list
+      setEvents((prev) =>
+        prev.map((e) => (e.id === event.id ? { ...e, ...event } : e))
+      )
+      setLastUpdated(new Date())
+    },
+    onEventDeleted: (eventId) => {
+      // Remove deleted event from the list
+      setEvents((prev) => prev.filter((e) => e.id !== eventId))
+      setLastUpdated(new Date())
+    },
+  })
+
+  // Auto-refresh effect - only poll when WebSocket is not connected
   useEffect(() => {
-    if (!token || isPaused) return
+    if (!token || isPaused || ws.isConnected) return
 
     loadEvents()
 
     const interval = setInterval(loadEvents, REFRESH_INTERVAL)
     return () => clearInterval(interval)
-  }, [token, isPaused, loadEvents])
+  }, [token, isPaused, ws.isConnected, loadEvents])
 
   // Apply filters whenever events or filters change
   useEffect(() => {
@@ -172,6 +196,11 @@ export default function EventsPage() {
                 Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
+            <ConnectionStatus
+              connectionState={ws.connectionState}
+              onRetry={ws.reconnect}
+              error={ws.error}
+            />
             <ExportButton token={token || ''} filters={filters} disabled={!token} />
             <Button
               variant="outline"
@@ -205,7 +234,9 @@ export default function EventsPage() {
         </div>
         {!isPaused && (
           <p className="text-xs text-muted-foreground">
-            Auto-refresh: {REFRESH_INTERVAL / 1000}s
+            {ws.isConnected
+              ? 'Real-time updates active'
+              : `Auto-refresh: ${REFRESH_INTERVAL / 1000}s`}
           </p>
         )}
       </header>
