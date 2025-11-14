@@ -34,7 +34,7 @@ node_modules/
 .taskmaster/
 
 # Claude Code instructions (personal workflow)
-CLAUDE.md 
+CLAUDE.md
 
 # amplify
 .amplify
