@@ -49,3 +49,15 @@ results/load-test-report.md
 # Frontend build output
 frontend/dist/
 frontend/.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.coverage
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json

@@ -5,11 +5,27 @@ A serverless FastAPI backend for managing Zapier webhook triggers, built with AW
 ## Architecture
 
 - **Backend**: FastAPI running on AWS Lambda with Lambda Web Adapter
-- **Frontend**: React + TypeScript web app for event submission (Sender UI)
+- **Frontend**: React + TypeScript web app with three pages:
+  - **Dashboard**: Real-time monitoring with metrics visualization (landing page)
+  - **Events Management**: Full event CRUD with filtering and export
+  - **Webhook Receiver**: Monitor incoming webhook events
 - **Database**: DynamoDB for event storage with GSI for status queries
 - **Secrets**: AWS Secrets Manager for secure credential storage
 - **Infrastructure**: AWS Amplify Gen 2 with CDK for IaC
 - **CI/CD**: Multi-environment deployment via AWS Amplify Console
+
+### Dashboard Features
+
+The monitoring dashboard provides real-time visibility into:
+- Event summary cards (total, pending, delivered, failed, success rate)
+- Event lifecycle flow visualization
+- Latency metrics (P50, P95, P99 percentiles)
+- Throughput metrics (events per minute/hour/day)
+- Error analytics with top error messages
+- Auto-refresh every 10 seconds (configurable)
+- Quick event submission interface
+
+**Dashboard Documentation**: [docs/DASHBOARD.md](./docs/DASHBOARD.md) | [docs/DASHBOARD_USER_GUIDE.md](./docs/DASHBOARD_USER_GUIDE.md)
 
 ## Multi-Environment Setup
 
@@ -106,9 +122,20 @@ Each environment gets its own isolated AWS resources:
 
 ### Accessing Environment URLs
 
-After deployment, find your API URLs in:
+**Dashboard URLs** (Frontend):
+- **Production**: `https://main.{amplify-app-id}.amplifyapp.com`
+- **Development**: `https://dev.{amplify-app-id}.amplifyapp.com`
+- **Sandbox**: `https://sandbox.{amplify-app-id}.amplifyapp.com`
+
+Find your specific URLs in: AWS Amplify Console → App → Branch → "Domain"
+
+**API URLs** (Backend):
 - AWS Amplify Console → App → Branch → Backend resources → "TriggersApiUrl"
 - Or via CloudFormation Outputs in the stack
+
+**Example**:
+- Dashboard: `https://main.d1abc234efgh.amplifyapp.com`
+- API: `https://xyz123.lambda-url.us-east-2.on.aws`
 
 ## Local Development
 
@@ -197,6 +224,8 @@ curl -X GET "https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aw
 
 **Essential Documentation:**
 - **[Quickstart Guide](./docs/QUICKSTART.md)** - Get started in 5 minutes
+- **[Dashboard Documentation](./docs/DASHBOARD.md)** - Technical documentation for the monitoring dashboard
+- **[Dashboard User Guide](./docs/DASHBOARD_USER_GUIDE.md)** - User-friendly guide for interpreting metrics
 - **[Developer Guide](./docs/DEVELOPER_GUIDE.md)** - Comprehensive integration guide with code examples
 - **[Webhook Receiver Guide](./docs/WEBHOOK_RECEIVER.md)** - Webhook endpoint documentation with signature validation examples
 - **[Sandbox Environment Guide](./docs/SANDBOX.md)** - Isolated testing environment setup and usage
