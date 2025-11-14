@@ -400,14 +400,14 @@ export function useWebSocket(config: UseWebSocketConfig = {}) {
 
   // Initial connection and cleanup
   useEffect(() => {
-    if (enabled && url && token) {
+    if (enabled && url) {
       connect()
     }
 
     return () => {
       disconnect()
     }
-  }, [enabled, url, token]) // Note: connect/disconnect not in deps to avoid reconnect loops
+  }, [enabled, url]) // Note: connect/disconnect not in deps to avoid reconnect loops
 
   return {
     state,
