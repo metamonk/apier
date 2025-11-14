@@ -9,7 +9,7 @@
  * - Send Event sheet (Task 20.7) ✅
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Zap, Pause, Play, RefreshCw, Database, Webhook } from 'lucide-react'
@@ -37,6 +37,7 @@ export default function DashboardPage() {
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const [isPaused, setIsPaused] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Fetch all metrics data in parallel
   const loadMetrics = useCallback(async () => {
@@ -64,6 +65,20 @@ export default function DashboardPage() {
     }
   }, [token])
 
+  // Debounced metrics refresh - prevents flash from multiple rapid updates
+  const debouncedLoadMetrics = useCallback(() => {
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+
+    // Set new timer
+    debounceTimerRef.current = setTimeout(() => {
+      loadMetrics()
+      debounceTimerRef.current = null
+    }, 500) // Wait 500ms after last update before refetching
+  }, [loadMetrics])
+
   // WebSocket connection for real-time updates
   const ws = useWebSocket({
     enabled: !!token && !isPaused,
@@ -74,13 +89,59 @@ export default function DashboardPage() {
       if (data.throughput) setThroughput(data.throughput)
       setLastUpdated(new Date())
     },
-    onEventUpdate: () => {
-      // Event was updated, refresh metrics
-      loadMetrics()
+    onEventUpdate: (event) => {
+      // Event was updated - optimistically update summary counts
+      if (!summary) return
+
+      setSummary(prev => {
+        if (!prev) return prev
+
+        // Adjust counts based on status change
+        const updatedSummary = { ...prev }
+
+        // If status changed, update counts accordingly
+        if (event.previous_status && event.data.status) {
+          // Decrement old status count
+          const oldStatusKey = `${event.previous_status}_events` as keyof EventSummary
+          if (typeof updatedSummary[oldStatusKey] === 'number') {
+            updatedSummary[oldStatusKey] = Math.max(0, (updatedSummary[oldStatusKey] as number) - 1)
+          }
+
+          // Increment new status count
+          const newStatusKey = `${event.data.status}_events` as keyof EventSummary
+          if (typeof updatedSummary[newStatusKey] === 'number') {
+            updatedSummary[newStatusKey] = (updatedSummary[newStatusKey] as number) + 1
+          }
+        }
+
+        return updatedSummary
+      })
+
+      setLastUpdated(new Date())
+
+      // Debounced full refresh to sync any discrepancies
+      debouncedLoadMetrics()
     },
-    onEventCreated: () => {
-      // New event created, refresh metrics
-      loadMetrics()
+    onEventCreated: (event) => {
+      // New event created - optimistically increment counts
+      setSummary(prev => {
+        if (!prev) return prev
+
+        return {
+          ...prev,
+          total_events: prev.total_events + 1,
+          pending_events: prev.pending_events + 1, // New events start as pending
+        }
+      })
+
+      setLastUpdated(new Date())
+
+      // Debounced full refresh to get accurate metrics
+      debouncedLoadMetrics()
+    },
+    onEventDeleted: () => {
+      // Event deleted - do a full refresh since we don't know which status it was
+      debouncedLoadMetrics()
     },
   })
 
