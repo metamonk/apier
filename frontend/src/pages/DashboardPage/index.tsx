@@ -21,22 +21,33 @@ import { SendEventSheet } from '../../components/send-event/SendEventSheet'
 import { ThemeToggle } from '../../components/ui/theme-toggle'
 import { useAuth } from '../../lib/useAuth'
 import { fetchSummary, fetchLatency, fetchThroughput } from '../../lib/metrics-client'
-import type { EventSummary, LatencyMetrics, ThroughputMetrics } from '../../lib/metrics-types'
 import { useWebSocket } from '../../lib/useWebSocket'
 import { ConnectionStatus } from '../../components/ConnectionStatus'
+import { useDashboardStore } from '../../stores/dashboardStore'
 
 const REFRESH_INTERVAL = 10000 // 10 seconds
 
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { token, loading: authLoading, error: authError } = useAuth()
-  const [summary, setSummary] = useState<EventSummary | null>(null)
-  const [latency, setLatency] = useState<LatencyMetrics | null>(null)
-  const [throughput, setThroughput] = useState<ThroughputMetrics | null>(null)
-  const [metricsLoading, setMetricsLoading] = useState(false)
-  const [metricsError, setMetricsError] = useState<string | null>(null)
+
+  // Zustand store - no Provider needed, automatic shallow comparison
+  const {
+    summary,
+    latency,
+    throughput,
+    loading,
+    error: metricsError,
+    lastUpdated,
+    updateMetrics,
+    setLoading,
+    setError,
+    optimisticEventCreated,
+    optimisticEventStatusChanged,
+    optimisticEventDeleted,
+  } = useDashboardStore()
+
   const [isPaused, setIsPaused] = useState(false)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Fetch all metrics data in parallel
@@ -44,8 +55,8 @@ export default function DashboardPage() {
     if (!token) return
 
     try {
-      setMetricsLoading(true)
-      setMetricsError(null)
+      setLoading(true)
+      setError(null)
 
       // Fetch all metrics in parallel
       const [summaryData, latencyData, throughputData] = await Promise.all([
@@ -54,16 +65,18 @@ export default function DashboardPage() {
         fetchThroughput(token),
       ])
 
-      setSummary(summaryData)
-      setLatency(latencyData)
-      setThroughput(throughputData)
-      setLastUpdated(new Date())
+      // Update all metrics at once through unified Zustand store
+      updateMetrics({
+        summary: summaryData,
+        latency: latencyData,
+        throughput: throughputData,
+      })
     } catch (err) {
-      setMetricsError(err instanceof Error ? err.message : 'Failed to load metrics')
+      setError(err instanceof Error ? err.message : 'Failed to load metrics')
     } finally {
-      setMetricsLoading(false)
+      setLoading(false)
     }
-  }, [token])
+  }, [token, setLoading, setError, updateMetrics])
 
   // Debounced metrics refresh - prevents flash from multiple rapid updates
   const debouncedLoadMetrics = useCallback(() => {
@@ -83,64 +96,34 @@ export default function DashboardPage() {
   const ws = useWebSocket({
     enabled: !!token && !isPaused,
     onMetricsUpdate: (data) => {
-      // Real-time metrics update from WebSocket
-      if (data.summary) setSummary(data.summary)
-      if (data.latency) setLatency(data.latency)
-      if (data.throughput) setThroughput(data.throughput)
-      setLastUpdated(new Date())
+      // Real-time metrics update from WebSocket - update unified Zustand store
+      updateMetrics({
+        summary: data.summary,
+        latency: data.latency,
+        throughput: data.throughput,
+      })
     },
     onEventUpdate: (event) => {
-      // Event was updated - optimistically update summary counts
-      if (!summary) return
-
-      setSummary(prev => {
-        if (!prev) return prev
-
-        // Adjust counts based on status change
-        const updatedSummary = { ...prev }
-
-        // If status changed, update counts accordingly
-        if (event.previous_status && event.data.status) {
-          // Decrement old status count
-          const oldStatusKey = `${event.previous_status}_events` as keyof EventSummary
-          if (typeof updatedSummary[oldStatusKey] === 'number') {
-            updatedSummary[oldStatusKey] = Math.max(0, (updatedSummary[oldStatusKey] as number) - 1)
-          }
-
-          // Increment new status count
-          const newStatusKey = `${event.data.status}_events` as keyof EventSummary
-          if (typeof updatedSummary[newStatusKey] === 'number') {
-            updatedSummary[newStatusKey] = (updatedSummary[newStatusKey] as number) + 1
-          }
-        }
-
-        return updatedSummary
-      })
-
-      setLastUpdated(new Date())
+      // Event status changed - use unified optimistic update
+      if (event.previous_status && event.data.status) {
+        optimisticEventStatusChanged(event.previous_status, event.data.status)
+      }
 
       // Debounced full refresh to sync any discrepancies
       debouncedLoadMetrics()
     },
-    onEventCreated: (event) => {
-      // New event created - optimistically increment counts
-      setSummary(prev => {
-        if (!prev) return prev
-
-        return {
-          ...prev,
-          total_events: prev.total_events + 1,
-          pending_events: prev.pending_events + 1, // New events start as pending
-        }
-      })
-
-      setLastUpdated(new Date())
+    onEventCreated: () => {
+      // New event created - use unified optimistic update
+      optimisticEventCreated()
 
       // Debounced full refresh to get accurate metrics
       debouncedLoadMetrics()
     },
     onEventDeleted: () => {
-      // Event deleted - do a full refresh since we don't know which status it was
+      // Event deleted - use unified optimistic update
+      optimisticEventDeleted()
+
+      // Debounced full refresh
       debouncedLoadMetrics()
     },
   })
@@ -215,10 +198,10 @@ export default function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={handleManualRefresh}
-              disabled={metricsLoading || authLoading}
+              disabled={loading || authLoading}
               className="gap-2"
             >
-              <RefreshCw className={`h-4 w-4 ${metricsLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <Button
@@ -299,7 +282,7 @@ export default function DashboardPage() {
             <p className="text-sm text-red-800 dark:text-red-200">{metricsError}</p>
           </div>
         ) : (
-          <EventCountCards summary={summary} loading={authLoading || metricsLoading} />
+          <EventCountCards summary={summary} loading={authLoading || loading} />
         )}
       </section>
 
@@ -312,7 +295,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="p-6 rounded-lg border border-border bg-card">
-            <LifecycleFlow summary={summary} loading={authLoading || metricsLoading} />
+            <LifecycleFlow summary={summary} loading={authLoading || loading} />
           </div>
         )}
       </section>
@@ -328,7 +311,7 @@ export default function DashboardPage() {
           <MetricsCharts
             latency={latency}
             throughput={throughput}
-            loading={authLoading || metricsLoading}
+            loading={authLoading || loading}
           />
         )}
       </section>

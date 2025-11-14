@@ -128,8 +128,9 @@ triggersApiFunction.addToRolePolicy(new iam.PolicyStatement({
 }));
 
 // Create Function URL for the Lambda (simpler than API Gateway for this use case)
+// Note: Using NONE for AWS-level auth - security is handled at application level via JWT tokens
 const functionUrl = triggersApiFunction.addFunctionUrl({
-  authType: lambda.FunctionUrlAuthType.NONE, // TODO: Add authentication in production
+  authType: lambda.FunctionUrlAuthType.NONE,
   cors: {
     allowedOrigins: ['*'],
     allowedMethods: [lambda.HttpMethod.ALL],
