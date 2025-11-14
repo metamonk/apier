@@ -533,6 +533,20 @@ const wsDisconnectFunction = new lambda.Function(stack, 'WebSocketDisconnectFunc
 // Grant permissions to delete from connections table
 connectionsTable.grantWriteData(wsDisconnectFunction);
 
+// Create Lambda function for WebSocket message handler (Task 27.2)
+const wsMessageFunction = new lambda.Function(stack, 'WebSocketMessageFunction', {
+  runtime: lambda.Runtime.PYTHON_3_12,
+  handler: 'main.handler',
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/websocket-message')),
+  architecture: lambda.Architecture.X86_64,
+  memorySize: 256,
+  timeout: cdk.Duration.seconds(10),
+  tracing: lambda.Tracing.ACTIVE,
+  environment: {
+    // WEBSOCKET_API_ENDPOINT will be set after WebSocket API is created
+  },
+});
+
 // Create Lambda function for WebSocket broadcaster (Task 27.4)
 const wsBroadcasterFunction = new lambda.Function(stack, 'WebSocketBroadcasterFunction', {
   runtime: lambda.Runtime.PYTHON_3_12,
@@ -587,9 +601,24 @@ webSocketApi.addRoute('$disconnect', {
 webSocketApi.addRoute('$default', {
   integration: new apigatewayv2_integrations.WebSocketLambdaIntegration(
     'DefaultIntegration',
-    wsConnectFunction // Reuse connect function for simple acknowledgment
+    wsMessageFunction // Use message handler for PING/PONG and other messages
   ),
 });
+
+// Grant message handler permission to post messages to WebSocket API
+wsMessageFunction.addToRolePolicy(new iam.PolicyStatement({
+  effect: iam.Effect.ALLOW,
+  actions: ['execute-api:ManageConnections'],
+  resources: [
+    `arn:aws:execute-api:${stack.region}:${stack.account}:${webSocketApi.apiId}/${webSocketStage.stageName}/*`,
+  ],
+}));
+
+// Update message handler environment with WebSocket API endpoint
+wsMessageFunction.addEnvironment(
+  'WEBSOCKET_API_ENDPOINT',
+  `${webSocketApi.apiEndpoint}/${webSocketStage.stageName}`
+);
 
 // Grant broadcaster permission to post messages to WebSocket API (Task 27.4)
 wsBroadcasterFunction.addToRolePolicy(new iam.PolicyStatement({
