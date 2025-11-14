@@ -8,6 +8,8 @@ import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cdk from 'aws-cdk-lib';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import { RemovalPolicy } from 'aws-cdk-lib';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -54,6 +56,21 @@ eventsTable.addGlobalSecondaryIndex({
   },
   sortKey: {
     name: 'created_at',
+    type: dynamodb.AttributeType.STRING,
+  },
+});
+
+// Add GSI for delivery attempt queries (Task 22.2)
+// Sparse index - only indexes events with non-null last_delivery_attempt
+// Use cases: retry logic, delivery-time-based metrics, stale event detection
+eventsTable.addGlobalSecondaryIndex({
+  indexName: 'last-attempt-index',
+  partitionKey: {
+    name: 'status',
+    type: dynamodb.AttributeType.STRING,
+  },
+  sortKey: {
+    name: 'last_delivery_attempt',
     type: dynamodb.AttributeType.STRING,
   },
 });
@@ -326,4 +343,136 @@ dashboard.addWidgets(
 new cdk.CfnOutput(stack, 'DashboardUrl', {
   value: `https://console.aws.amazon.com/cloudwatch/home?region=${stack.region}#dashboards:name=${dashboard.dashboardName}`,
   description: 'CloudWatch Dashboard URL',
+});
+
+// ========================================
+// DISPATCHER SERVICE RESOURCES
+// ========================================
+
+// Create Lambda function for event dispatcher
+const dispatcherFunction = new lambda.Function(stack, 'DispatcherFunction', {
+  runtime: lambda.Runtime.PYTHON_3_12,
+  handler: 'main.handler',
+  code: lambda.Code.fromAsset(join(__dirname, 'functions/dispatcher')),
+  architecture: lambda.Architecture.X86_64,
+  memorySize: 256,
+  timeout: cdk.Duration.seconds(300), // 5 minutes for processing multiple events
+  tracing: lambda.Tracing.ACTIVE,
+  environment: {
+    API_BASE_URL: functionUrl.url.replace(/\/$/, ''), // Remove trailing slash
+    DYNAMODB_TABLE_NAME: eventsTable.tableName,
+    SECRET_ARN: apiSecret.secretArn,
+    MAX_EVENTS_PER_RUN: '100',
+  },
+});
+
+// Grant dispatcher permissions to read/write DynamoDB
+eventsTable.grantReadWriteData(dispatcherFunction);
+
+// Grant dispatcher permissions to read secrets
+apiSecret.grantRead(dispatcherFunction);
+
+// Grant dispatcher permissions to publish CloudWatch metrics
+dispatcherFunction.addToRolePolicy(new iam.PolicyStatement({
+  effect: iam.Effect.ALLOW,
+  actions: ['cloudwatch:PutMetricData'],
+  resources: ['*'],
+}));
+
+// Create EventBridge rule to trigger dispatcher every 5 minutes
+const dispatcherRule = new events.Rule(stack, 'DispatcherScheduleRule', {
+  ruleName: `zapier-dispatcher-schedule-${stack.stackName}`,
+  description: 'Triggers dispatcher Lambda every 5 minutes to process pending events',
+  schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+  enabled: true,
+});
+
+// Add dispatcher Lambda as target
+dispatcherRule.addTarget(new targets.LambdaFunction(dispatcherFunction, {
+  retryAttempts: 2,
+}));
+
+// Create CloudWatch alarms for dispatcher
+const dispatcherErrorAlarm = new cloudwatch.Alarm(stack, 'DispatcherErrorAlarm', {
+  alarmName: `zapier-dispatcher-errors-${stack.stackName}`,
+  alarmDescription: 'Alert when dispatcher Lambda encounters errors',
+  metric: dispatcherFunction.metricErrors({
+    period: cdk.Duration.minutes(5),
+    statistic: 'Sum',
+  }),
+  threshold: 3,
+  evaluationPeriods: 1,
+  comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+  treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+});
+
+dispatcherErrorAlarm.addAlarmAction(new cloudwatch_actions.SnsAction(alertsTopic));
+
+// Add dispatcher metrics to dashboard
+dashboard.addWidgets(
+  new cloudwatch.GraphWidget({
+    title: 'Dispatcher - Event Processing',
+    left: [
+      new cloudwatch.Metric({
+        namespace: 'ZapierTriggersAPI/Dispatcher',
+        metricName: 'EventsProcessed',
+        statistic: 'Sum',
+        label: 'Events Processed',
+        color: cloudwatch.Color.BLUE,
+        period: cdk.Duration.minutes(5),
+      }),
+      new cloudwatch.Metric({
+        namespace: 'ZapierTriggersAPI/Dispatcher',
+        metricName: 'SuccessfulDeliveries',
+        statistic: 'Sum',
+        label: 'Successful',
+        color: cloudwatch.Color.GREEN,
+        period: cdk.Duration.minutes(5),
+      }),
+      new cloudwatch.Metric({
+        namespace: 'ZapierTriggersAPI/Dispatcher',
+        metricName: 'FailedDeliveries',
+        statistic: 'Sum',
+        label: 'Failed',
+        color: cloudwatch.Color.RED,
+        period: cdk.Duration.minutes(5),
+      }),
+    ],
+    width: 12,
+  }),
+  new cloudwatch.GraphWidget({
+    title: 'Dispatcher - Performance',
+    left: [
+      new cloudwatch.Metric({
+        namespace: 'ZapierTriggersAPI/Dispatcher',
+        metricName: 'DeliveryLatency',
+        statistic: 'Average',
+        label: 'Avg Delivery Time (ms)',
+        color: cloudwatch.Color.PURPLE,
+        period: cdk.Duration.minutes(5),
+      }),
+    ],
+    right: [
+      new cloudwatch.Metric({
+        namespace: 'ZapierTriggersAPI/Dispatcher',
+        metricName: 'RetryAttempts',
+        statistic: 'Sum',
+        label: 'Retry Attempts',
+        color: cloudwatch.Color.ORANGE,
+        period: cdk.Duration.minutes(5),
+      }),
+    ],
+    width: 12,
+  })
+);
+
+// Output Dispatcher Function details
+new cdk.CfnOutput(stack, 'DispatcherFunctionArn', {
+  value: dispatcherFunction.functionArn,
+  description: 'ARN of the Dispatcher Lambda function',
+});
+
+new cdk.CfnOutput(stack, 'DispatcherScheduleRuleName', {
+  value: dispatcherRule.ruleName,
+  description: 'Name of the EventBridge rule that triggers the dispatcher',
 });
