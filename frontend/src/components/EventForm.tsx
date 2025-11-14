@@ -361,12 +361,11 @@ function EventForm({ onEventCreated, onError }: EventFormProps) {
         )}
 
         {/* Send Button */}
-        <div className="flex items-center justify-between pt-2">
-          <p className="text-sm text-muted-foreground">Ready to trigger your event?</p>
+        <div className="pt-2">
           <Button
             type="submit"
             disabled={status === "sending"}
-            className="min-w-[140px]"
+            className="w-full bg-green-600 hover:bg-green-700 text-white"
             size="lg"
           >
             {getStatusIcon()}

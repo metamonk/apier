@@ -18,6 +18,7 @@ import { EventCountCards } from '../../components/dashboard/EventCountCards'
 import { LifecycleFlow } from '../../components/dashboard/LifecycleFlow'
 import { MetricsCharts } from '../../components/dashboard/MetricsCharts'
 import { SendEventSheet } from '../../components/send-event/SendEventSheet'
+import { ThemeToggle } from '../../components/ui/theme-toggle'
 import { useAuth } from '../../lib/useAuth'
 import { fetchSummary, fetchLatency, fetchThroughput } from '../../lib/metrics-client'
 import type { EventSummary, LatencyMetrics, ThroughputMetrics } from '../../lib/metrics-types'
@@ -120,6 +121,7 @@ export default function DashboardPage() {
                 Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
+            <ThemeToggle />
             <SendEventSheet onEventSent={loadMetrics} />
             <Button
               variant="outline"
@@ -168,7 +170,7 @@ export default function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Button
             variant="outline"
-            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer"
             onClick={() => navigate('/events')}
           >
             <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-primary/10">
@@ -183,7 +185,7 @@ export default function DashboardPage() {
           </Button>
           <Button
             variant="outline"
-            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer"
             onClick={() => navigate('/webhooks')}
           >
             <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-primary/10">
