@@ -29,6 +29,30 @@ from aws_xray_sdk.core import xray_recorder, patch_all
 # Patch all AWS SDK calls for automatic tracing
 patch_all()
 
+# Utility function to convert floats to Decimals for DynamoDB
+def convert_floats_to_decimal(obj):
+    """
+    Recursively convert all float values to Decimal for DynamoDB compatibility.
+
+    DynamoDB does not support Python's float type - it requires Decimal instead.
+    This function walks through dictionaries, lists, and nested structures to
+    convert all float values while preserving the structure.
+
+    Args:
+        obj: Object to convert (dict, list, or primitive)
+
+    Returns:
+        Object with all floats converted to Decimal
+    """
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {k: convert_floats_to_decimal(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    else:
+        return obj
+
 # Import authentication utilities
 import auth
 from auth import (
@@ -798,11 +822,12 @@ async def create_event(
     ttl_timestamp = int((datetime.utcnow() + timedelta(days=90)).timestamp())
 
     # Store event in DynamoDB
+    # Convert floats to Decimals for DynamoDB compatibility
     event_data = {
         "id": event_id,
         "type": event.type,
         "source": event.source,
-        "payload": event.payload,
+        "payload": convert_floats_to_decimal(event.payload),
         "status": "pending",
         "created_at": timestamp,
         "updated_at": timestamp,
