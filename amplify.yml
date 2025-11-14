@@ -18,7 +18,6 @@ frontend:
         - pnpm install --frozen-lockfile
     build:
       commands:
-        - cd frontend
         - pnpm build
   artifacts:
     baseDirectory: frontend/dist
