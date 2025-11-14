@@ -18,6 +18,10 @@ frontend:
         - pnpm install --frozen-lockfile
     build:
       commands:
+        - export VITE_API_URL=$VITE_API_URL
+        - export VITE_API_KEY=$VITE_API_KEY
+        - export VITE_WEBSOCKET_URL=$VITE_WEBSOCKET_URL
+        - export VITE_OPENAI_API_KEY=$VITE_OPENAI_API_KEY
         - pnpm build
   artifacts:
     baseDirectory: frontend/dist
