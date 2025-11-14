@@ -5,6 +5,9 @@ backend:
       commands:
         - npm install -g pnpm
         - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/api/requirements.txt -t amplify/functions/api/'
+        - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/websocket-connect/requirements.txt -t amplify/functions/websocket-connect/'
+        - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/websocket-disconnect/requirements.txt -t amplify/functions/websocket-disconnect/'
+        - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/websocket-broadcaster/requirements.txt -t amplify/functions/websocket-broadcaster/'
     build:
       commands:
         - pnpm install --frozen-lockfile
