@@ -12,7 +12,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
-import { Zap, Pause, Play, RefreshCw, Database, Webhook } from 'lucide-react'
+import { Zap, Pause, Play, RefreshCw, Database, Webhook, BookOpen } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { EventCountCards } from '../../components/dashboard/EventCountCards'
 import { LifecycleFlow } from '../../components/dashboard/LifecycleFlow'
@@ -240,7 +240,7 @@ export default function DashboardPage() {
 
       {/* Quick Navigation */}
       <section className="mb-8">
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Button
             variant="outline"
             className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer"
@@ -268,6 +268,21 @@ export default function DashboardPage() {
               <div className="font-semibold mb-1">Webhook Receiver</div>
               <div className="text-sm text-muted-foreground">
                 Monitor incoming webhook events
+              </div>
+            </div>
+          </Button>
+          <Button
+            variant="outline"
+            className="h-auto p-6 justify-start gap-4 hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer"
+            onClick={() => window.open(`${import.meta.env.VITE_API_URL}/docs`, '_blank')}
+          >
+            <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-primary/10">
+              <BookOpen className="h-6 w-6 text-primary" />
+            </div>
+            <div className="text-left">
+              <div className="font-semibold mb-1">API Documentation</div>
+              <div className="text-sm text-muted-foreground">
+                Explore Swagger UI and test endpoints
               </div>
             </div>
           </Button>
