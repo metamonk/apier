@@ -9,6 +9,7 @@ backend:
         - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/websocket-disconnect/requirements.txt -t amplify/functions/websocket-disconnect/'
         - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/websocket-message/requirements.txt -t amplify/functions/websocket-message/'
         - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/websocket-broadcaster/requirements.txt -t amplify/functions/websocket-broadcaster/'
+        - 'pip install --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12 --implementation cp -r amplify/functions/dispatcher/requirements.txt -t amplify/functions/dispatcher/'
     build:
       commands:
         - pnpm install --frozen-lockfile
