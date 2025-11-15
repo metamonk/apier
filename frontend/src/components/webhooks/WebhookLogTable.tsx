@@ -81,6 +81,7 @@ export function WebhookLogTable({ logs, loading }: WebhookLogTableProps) {
           <thead className="bg-muted/50 border-b">
             <tr>
               <th className="w-8 px-4 py-3"></th>
+              <th className="px-4 py-3 text-left text-sm font-medium">Event ID</th>
               <th className="px-4 py-3 text-left text-sm font-medium">Timestamp</th>
               <th className="px-4 py-3 text-left text-sm font-medium">Event Type</th>
               <th className="px-4 py-3 text-left text-sm font-medium">Source IP</th>
@@ -106,6 +107,9 @@ export function WebhookLogTable({ logs, loading }: WebhookLogTableProps) {
                           <ChevronRight className="h-4 w-4" />
                         )}
                       </button>
+                    </td>
+                    <td className="px-4 py-3 text-xs font-mono text-muted-foreground max-w-xs truncate" title={log.id}>
+                      {log.id}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono whitespace-nowrap">
                       {formatTimestamp(log.timestamp)}
@@ -149,13 +153,10 @@ export function WebhookLogTable({ logs, loading }: WebhookLogTableProps) {
                   </tr>
                   {isExpanded && (
                     <tr key={`${log.id}-details`} className="bg-muted/20">
-                      <td colSpan={7} className="px-4 py-4">
+                      <td colSpan={8} className="px-4 py-4">
                         <div className="space-y-3">
                           <div className="flex items-center justify-between mb-2">
                             <h4 className="text-sm font-semibold">Payload</h4>
-                            <code className="text-xs text-muted-foreground font-mono">
-                              ID: {log.id}
-                            </code>
                           </div>
                           <pre className="bg-background border rounded-lg p-4 overflow-x-auto text-xs font-mono">
                             {JSON.stringify(log.payload, null, 2)}
