@@ -1583,16 +1583,36 @@ async def get_event_deliveries(
         limit = min(limit, 1000)  # Cap at 1000
 
         # Query using last-attempt-index GSI to get events with delivery attempts
-        # This GSI has a dummy partition key and last_delivery_attempt as sort key
-        response = table.query(
+        # The GSI uses status as partition key and last_delivery_attempt as sort key
+        # We need to query for each status and merge results
+        all_items = []
+
+        # Query for delivered events
+        response_delivered = table.query(
             IndexName='last-attempt-index',
-            KeyConditionExpression=Key('gsi_pk').eq('EVENT'),
+            KeyConditionExpression=Key('status').eq('delivered'),
             ScanIndexForward=False,  # Sort by last_delivery_attempt descending
             Limit=limit
         )
+        all_items.extend(response_delivered.get('Items', []))
+
+        # Query for failed events
+        response_failed = table.query(
+            IndexName='last-attempt-index',
+            KeyConditionExpression=Key('status').eq('failed'),
+            ScanIndexForward=False,  # Sort by last_delivery_attempt descending
+            Limit=limit
+        )
+        all_items.extend(response_failed.get('Items', []))
+
+        # Sort all items by last_delivery_attempt descending
+        all_items.sort(key=lambda x: x.get('last_delivery_attempt', ''), reverse=True)
+
+        # Limit to requested amount
+        all_items = all_items[:limit]
 
         events = []
-        for item in response.get('Items', []):
+        for item in all_items:
             # Only include events that have actually been attempted for delivery
             if item.get('last_delivery_attempt'):
                 events.append(InboxEvent(
