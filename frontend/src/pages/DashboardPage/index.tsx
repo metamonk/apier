@@ -188,7 +188,7 @@ export default function DashboardPage() {
               </span>
             )}
             <ConnectionStatus
-              connectionState={ws.connectionState}
+              state={ws.state}
               onRetry={ws.reconnect}
               error={ws.error}
             />

@@ -10,13 +10,14 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Card } from '../../components/ui/card'
-import { Webhook, RefreshCw, Pause, Play, Search, Filter, Send } from 'lucide-react'
+import { Webhook, RefreshCw, Pause, Play, Search, Filter, Send, ArrowLeft } from 'lucide-react'
 import { WebhookLogTable } from '../../components/webhooks/WebhookLogTable'
 import { WebhookTestSender } from '../../components/webhooks/WebhookTestSender'
 import { HmacValidator } from '../../components/webhooks/HmacValidator'
@@ -36,6 +37,7 @@ export interface WebhookLog {
 }
 
 export default function WebhooksPage() {
+  const navigate = useNavigate()
   const { token, loading: authLoading, error: authError } = useAuth()
   const [logs, setLogs] = useState<WebhookLog[]>([])
   const [filteredLogs, setFilteredLogs] = useState<WebhookLog[]>([])
@@ -61,27 +63,46 @@ export default function WebhooksPage() {
       setLoading(true)
       setError(null)
 
-      // Build query params
+      // Build query params - /events/deliveries only supports limit parameter
       const params = new URLSearchParams()
-      if (eventTypeFilter && eventTypeFilter !== 'all') params.append('event_type', eventTypeFilter)
-      if (searchQuery) params.append('search', searchQuery)
-      if (startDate) params.append('start_date', new Date(startDate).toISOString())
-      if (endDate) params.append('end_date', new Date(endDate).toISOString())
       params.append('limit', '100')
 
-      const response = await fetch(`${API_URL}/webhooks/logs?${params.toString()}`, {
+      const response = await fetch(`${API_URL}/events/deliveries?${params.toString()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       })
 
       if (!response.ok) {
-        throw new Error('Failed to fetch webhook logs')
+        throw new Error('Failed to fetch webhook deliveries')
       }
 
       const data = await response.json()
+
+      // Apply client-side filtering since backend only supports limit
+      let filtered = data
+      if (eventTypeFilter && eventTypeFilter !== 'all') {
+        filtered = filtered.filter((log: any) => log.type === eventTypeFilter)
+      }
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase()
+        filtered = filtered.filter((log: any) =>
+          log.id.toLowerCase().includes(query) ||
+          log.type.toLowerCase().includes(query) ||
+          JSON.stringify(log.payload).toLowerCase().includes(query)
+        )
+      }
+      if (startDate) {
+        const start = new Date(startDate).getTime()
+        filtered = filtered.filter((log: any) => new Date(log.created_at).getTime() >= start)
+      }
+      if (endDate) {
+        const end = new Date(endDate).getTime()
+        filtered = filtered.filter((log: any) => new Date(log.created_at).getTime() <= end)
+      }
+
       setLogs(data)
-      setFilteredLogs(data)
+      setFilteredLogs(filtered)
       setLastUpdated(new Date())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load webhook logs')
@@ -139,6 +160,15 @@ export default function WebhooksPage() {
       <header className="mb-8">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/')}
+              className="gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
             <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-purple-600">
               <Webhook className="h-5 w-5 text-white" />
             </div>

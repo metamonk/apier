@@ -8,16 +8,18 @@ import type { Event, EventFilters } from './event-types'
 const API_URL = import.meta.env.VITE_API_URL || 'https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws'
 
 /**
- * Fetch events from /inbox endpoint with optional filters
+ * Fetch events from /events endpoint with optional filters
  */
 export async function fetchEvents(
   token: string,
   filters?: EventFilters
 ): Promise<Event[]> {
-  const url = new URL(`${API_URL}/inbox`)
+  const url = new URL(`${API_URL}/events`)
 
-  // Note: The current /inbox endpoint doesn't support query params yet
-  // Filtering will be done client-side for now
+  // Use server-side status filtering if provided
+  if (filters?.status) {
+    url.searchParams.set('status_filter', filters.status)
+  }
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -31,15 +33,12 @@ export async function fetchEvents(
 
   const events = await response.json()
 
-  // Client-side filtering until backend supports query params
+  // Client-side filtering for remaining filters
   let filteredEvents = events as Event[]
 
   if (filters) {
     if (filters.event_type) {
       filteredEvents = filteredEvents.filter(e => e.type === filters.event_type)
-    }
-    if (filters.status) {
-      filteredEvents = filteredEvents.filter(e => e.status === filters.status)
     }
     if (filters.search) {
       const searchLower = filters.search.toLowerCase()

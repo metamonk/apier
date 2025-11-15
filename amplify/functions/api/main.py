@@ -1471,6 +1471,152 @@ async def acknowledge_event(
         )
 
 
+# GET /events - Get all events with optional filtering (protected endpoint)
+@app.get("/events",
+         tags=["Events"],
+         summary="Get All Events",
+         response_description="List of events with optional filtering")
+async def get_events(
+    status_filter: Optional[str] = None,
+    limit: int = 100,
+    current_user: User = Depends(get_authenticated_user)
+) -> list[InboxEvent]:
+    """
+    ## Get Events
+
+    Retrieves all events with optional status filtering.
+
+    ### Authentication
+
+    Requires JWT bearer token in Authorization header.
+
+    ### Query Parameters
+
+    - **status**: Optional status filter (pending, delivered, failed)
+    - **limit**: Maximum number of events to return (default: 100, max: 1000)
+
+    ### Response
+
+    Returns array of events with full event details including delivery tracking.
+    """
+    try:
+        limit = min(limit, 1000)  # Cap at 1000
+
+        if status_filter:
+            # Query using status-index GSI for specific status
+            response = table.query(
+                IndexName='status-index',
+                KeyConditionExpression=Key('status').eq(status_filter),
+                ScanIndexForward=False,  # Sort by created_at descending
+                Limit=limit
+            )
+        else:
+            # Scan table for all events (no status filter)
+            response = table.scan(
+                Limit=limit
+            )
+            # Sort by created_at descending
+            items = sorted(
+                response.get('Items', []),
+                key=lambda x: x.get('created_at', ''),
+                reverse=True
+            )
+            response['Items'] = items[:limit]
+
+        events = []
+        for item in response.get('Items', []):
+            events.append(InboxEvent(
+                id=item['id'],
+                type=item['type'],
+                source=item['source'],
+                payload=item['payload'],
+                status=item['status'],
+                created_at=item['created_at'],
+                updated_at=item['updated_at'],
+                delivery_attempts=item.get('delivery_attempts', 0),
+                last_delivery_attempt=item.get('last_delivery_attempt'),
+                delivery_latency_ms=item.get('delivery_latency_ms'),
+                error_message=item.get('error_message')
+            ))
+
+        return events
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve events: {str(e)}"
+        )
+
+
+# GET /events/deliveries - Get webhook delivery logs (protected endpoint)
+@app.get("/events/deliveries",
+         tags=["Events"],
+         summary="Get Webhook Delivery Logs",
+         response_description="List of events with delivery tracking")
+async def get_event_deliveries(
+    limit: int = 100,
+    current_user: User = Depends(get_authenticated_user)
+) -> list[InboxEvent]:
+    """
+    ## Get Webhook Delivery Logs
+
+    Retrieves events that have been attempted for delivery to webhooks,
+    sorted by most recent delivery attempt.
+
+    ### Authentication
+
+    Requires JWT bearer token in Authorization header.
+
+    ### Query Parameters
+
+    - **limit**: Maximum number of delivery records to return (default: 100, max: 1000)
+
+    ### Response
+
+    Returns array of events with delivery tracking information including:
+    - delivery_attempts: Number of times delivery was attempted
+    - last_delivery_attempt: Timestamp of most recent delivery attempt
+    - delivery_latency_ms: Time from event creation to delivery
+    - error_message: Error details if delivery failed
+    - status: Event status (delivered, failed, etc.)
+    """
+    try:
+        limit = min(limit, 1000)  # Cap at 1000
+
+        # Query using last-attempt-index GSI to get events with delivery attempts
+        # This GSI has a dummy partition key and last_delivery_attempt as sort key
+        response = table.query(
+            IndexName='last-attempt-index',
+            KeyConditionExpression=Key('gsi_pk').eq('EVENT'),
+            ScanIndexForward=False,  # Sort by last_delivery_attempt descending
+            Limit=limit
+        )
+
+        events = []
+        for item in response.get('Items', []):
+            # Only include events that have actually been attempted for delivery
+            if item.get('last_delivery_attempt'):
+                events.append(InboxEvent(
+                    id=item['id'],
+                    type=item['type'],
+                    source=item['source'],
+                    payload=item['payload'],
+                    status=item['status'],
+                    created_at=item['created_at'],
+                    updated_at=item['updated_at'],
+                    delivery_attempts=item.get('delivery_attempts', 0),
+                    last_delivery_attempt=item.get('last_delivery_attempt'),
+                    delivery_latency_ms=item.get('delivery_latency_ms'),
+                    error_message=item.get('error_message')
+                ))
+
+        return events
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve delivery logs: {str(e)}"
+        )
+
+
 # DELETE /events/{event_id} - Delete event for GDPR/CCPA compliance (protected endpoint)
 @app.delete("/events/{event_id}",
            tags=["Events"],
