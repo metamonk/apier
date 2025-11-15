@@ -22,6 +22,8 @@ import { WebhookLogTable } from '../../components/webhooks/WebhookLogTable'
 import { WebhookTestSender } from '../../components/webhooks/WebhookTestSender'
 import { HmacValidator } from '../../components/webhooks/HmacValidator'
 import { useAuth } from '../../lib/useAuth'
+import { useWebSocket } from '../../lib/useWebSocket'
+import { ConnectionStatus } from '../../components/ConnectionStatus'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ollzpcmoeaco4cpc773nyz7c5q0zumqi.lambda-url.us-east-2.on.aws'
 const REFRESH_INTERVAL = 5000 // 5 seconds
@@ -54,6 +56,15 @@ export default function WebhooksPage() {
 
   // Get unique event types for filter dropdown
   const uniqueEventTypes = Array.from(new Set(logs.map(log => log.event_type))).sort()
+
+  // WebSocket connection for real-time delivery updates
+  const ws = useWebSocket({
+    enabled: !!token && !isPaused,
+    onEventUpdate: (event) => {
+      // Refresh logs when an event is delivered
+      loadLogs()
+    },
+  })
 
   // Fetch webhook logs
   const loadLogs = useCallback(async () => {
@@ -111,15 +122,15 @@ export default function WebhooksPage() {
     }
   }, [token, eventTypeFilter, searchQuery, startDate, endDate])
 
-  // Auto-refresh effect
+  // Auto-refresh effect - only poll when WebSocket is NOT connected
   useEffect(() => {
-    if (!token || isPaused) return
+    if (!token || isPaused || ws.isConnected) return
 
     loadLogs()
 
     const interval = setInterval(loadLogs, REFRESH_INTERVAL)
     return () => clearInterval(interval)
-  }, [token, isPaused, loadLogs])
+  }, [token, isPaused, ws.isConnected, loadLogs])
 
   // Manual refresh handler
   const handleManualRefresh = () => {
@@ -192,6 +203,11 @@ export default function WebhooksPage() {
                 Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
+            <ConnectionStatus
+              state={ws.state}
+              onRetry={ws.reconnect}
+              error={ws.error}
+            />
             <Button
               variant="outline"
               size="sm"
@@ -224,7 +240,9 @@ export default function WebhooksPage() {
         </div>
         {!isPaused && (
           <p className="text-xs text-muted-foreground">
-            Auto-refresh: {REFRESH_INTERVAL / 1000}s
+            {ws.isConnected
+              ? 'Real-time updates active'
+              : `Auto-refresh: ${REFRESH_INTERVAL / 1000}s`}
           </p>
         )}
       </header>

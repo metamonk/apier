@@ -197,7 +197,7 @@ export default function EventsPage() {
               </span>
             )}
             <ConnectionStatus
-              connectionState={ws.connectionState}
+              state={ws.state}
               onRetry={ws.reconnect}
               error={ws.error}
             />
