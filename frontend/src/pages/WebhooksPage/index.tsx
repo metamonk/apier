@@ -90,29 +90,42 @@ export default function WebhooksPage() {
 
       const data = await response.json()
 
+      // Transform backend response to match WebhookLog interface
+      // Backend returns: created_at, type, source
+      // Frontend expects: timestamp, event_type, source_ip
+      const transformedData = data.map((item: any) => ({
+        id: item.id,
+        event_type: item.type,
+        timestamp: item.created_at,
+        source_ip: item.source || 'unknown',
+        payload: item.payload,
+        status: item.status,
+        request_id: undefined, // Not provided by backend
+      }))
+
       // Apply client-side filtering since backend only supports limit
-      let filtered = data
+      let filtered = transformedData
       if (eventTypeFilter && eventTypeFilter !== 'all') {
-        filtered = filtered.filter((log: any) => log.type === eventTypeFilter)
+        filtered = filtered.filter((log: any) => log.event_type === eventTypeFilter)
       }
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
         filtered = filtered.filter((log: any) =>
           log.id.toLowerCase().includes(query) ||
-          log.type.toLowerCase().includes(query) ||
+          log.event_type.toLowerCase().includes(query) ||
           JSON.stringify(log.payload).toLowerCase().includes(query)
         )
       }
       if (startDate) {
         const start = new Date(startDate).getTime()
-        filtered = filtered.filter((log: any) => new Date(log.created_at).getTime() >= start)
+        filtered = filtered.filter((log: any) => new Date(log.timestamp).getTime() >= start)
       }
       if (endDate) {
         const end = new Date(endDate).getTime()
-        filtered = filtered.filter((log: any) => new Date(log.created_at).getTime() <= end)
+        filtered = filtered.filter((log: any) => new Date(log.timestamp).getTime() <= end)
       }
 
-      setLogs(data)
+      setLogs(transformedData)
       setFilteredLogs(filtered)
       setLastUpdated(new Date())
     } catch (err) {
